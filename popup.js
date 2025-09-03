@@ -47,6 +47,7 @@ function renderMediaList(mediaList) {
   container.innerHTML = '';
   if (!mediaList.length) {
     container.innerHTML = '<div id="no-media">未检测到任何标签页的音视频</div>';
+    container.classList.remove('preload-hidden');
     return;
   }
   for (const {tab, info} of mediaList) {
@@ -72,26 +73,45 @@ function renderMediaList(mediaList) {
         <span class="media-state">${info.paused ? '⏸ 暂停' : '▶ 播放'}</span>
       </div>
       <div class="media-title" title="${tab.title}">${formatTabTitle(tab)}</div>
-      <div class="media-controls">
-        <button class="media-btn media-play">${info.paused ? '▶' : '⏸'}</button>
-        <button class="media-btn media-back">⏪</button>
-        <button class="media-btn media-forward">⏩</button>
-        <select class="media-speed">
-          <option value="0.5">0.5x</option>
-          <option value="0.75">0.75x</option>
-          <option value="1" selected>1x</option>
-          <option value="1.25">1.25x</option>
-          <option value="1.5">1.5x</option>
-          <option value="2">2x</option>
-          <option value="custom">自定义</option>
-        </select>
-        <input class="media-speed-custom" type="number" min="0.1" max="10" step="0.05" style="width:50px;display:none;" placeholder="倍速" />
-  <button class="media-btn media-reset" title="重置为1倍速">1x</button>
+  <div class="media-controls media-controls-row1">
+          <button class="media-btn media-play">${info.paused ? '▶' : '⏸'}</button>
+          <button class="media-btn media-back">⏪</button>
+          <button class="media-btn media-forward">⏩</button>
+          <select class="media-speed">
+            <option value="0.5">0.5x</option>
+            <option value="0.75">0.75x</option>
+            <option value="1" selected>1x</option>
+            <option value="1.25">1.25x</option>
+            <option value="1.5">1.5x</option>
+            <option value="2">2x</option>
+            <option value="custom">自定义</option>
+          </select>
+          <input class="media-speed-custom" type="number" min="0.1" max="10" step="0.05" style="width:60px;display:none;height:32px;box-sizing:border-box;padding:4px 6px;" placeholder="倍速" />
+          <button class="media-btn media-reset" title="重置为1倍速">1x</button>
+        </div>
+        
+      </div>
+      <div class="media-controls media-controls-row2" style="display:flex;align-items:center;gap:12px;margin-bottom:4px;">
+        <div class="media-audio-group" style="display:flex;align-items:center;gap:4px;">
+          <span class="vol-icon" title="静音/恢复" data-muted="${info.muted? '1':'0'}">${info.muted ? '🔇' : '🔊'}</span>
+          <input class="media-volume" type="range" min="0" max="1" step="0.01" value="${info.volume != null ? info.volume : 1}">
+        </div>
+        <button class="media-btn media-eq-toggle" title="音效均衡(EQ)">🎶</button>
       </div>
       <div class="media-progress">
         <span class="media-time">${info.currentTime}</span> / <span class="media-duration">${info.duration}</span>
       </div>
       <input type="range" class="seek-bar" min="0" max="${info.rawDuration}" value="${info.rawCurrentTime}" step="0.01" ${!isFinite(info.rawDuration) ? 'disabled' : ''}>
+      <div class="eq-panel" style="display:none;margin-top:10px;border-top:1px solid #eee;padding-top:8px;">
+        <div class="eq-presets" style="display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap;">
+          <select class="eq-preset-select" style="flex:1;min-width:140px;font-size:12px;padding:4px 6px;"></select>
+          <input class="eq-save-name" type="text" placeholder="自定义名称" style="flex:1;min-width:120px;font-size:12px;padding:4px 6px;">
+          <button class="media-btn eq-save" style="font-size:12px;">保存</button>
+          <button class="media-btn eq-del" style="font-size:12px;display:none;">删除</button>
+        </div>
+        <div class="eq-bands" style="display:flex;gap:8px;justify-content:space-between;">
+        </div>
+      </div>
     `;
     // 控件事件
     // 播放/暂停
@@ -155,6 +175,111 @@ function renderMediaList(mediaList) {
 
     backBtn.addEventListener('click', () => accumulateSeek(tab.id, -10));
     fwdBtn.addEventListener('click', () => accumulateSeek(tab.id, 10));
+    // 静音切换
+    // 音量与静音
+    const volIcon = card.querySelector('.vol-icon');
+    const volSlider = card.querySelector('.media-volume');
+    if (volIcon) {
+      volIcon.addEventListener('click', async () => {
+        const latest = await sendToTab(tab.id, {type:'gmcx-get-media-info'});
+        if (!latest || !latest.ok) return;
+        if (latest.muted || latest.volume === 0) {
+          // 取消静音：若 volume 为 0 则恢复 0.5
+            if (latest.volume === 0) {
+              await sendToTab(tab.id, {type:'gmcx-set-media-volume', value: 0.5});
+            }
+          await sendToTab(tab.id, {type:'gmcx-unmute-media'});
+        } else {
+          await sendToTab(tab.id, {type:'gmcx-mute-media'});
+        }
+        refreshMediaList(false);
+      });
+    }
+    if (volSlider) {
+      let volTimer = null;
+      volSlider.addEventListener('input', (e) => {
+        const v = Number(e.target.value);
+        clearTimeout(volTimer);
+        volTimer = setTimeout(async () => {
+          await sendToTab(tab.id, {type:'gmcx-set-media-volume', value: v});
+          refreshMediaList(false);
+        }, 120);
+      });
+    }
+    // EQ 面板逻辑
+    const eqToggle = card.querySelector('.media-eq-toggle');
+    const eqPanel = card.querySelector('.eq-panel');
+    const eqPresetSelect = card.querySelector('.eq-preset-select');
+    const eqBandsWrap = card.querySelector('.eq-bands');
+    const eqSaveName = card.querySelector('.eq-save-name');
+    const eqSaveBtn = card.querySelector('.eq-save');
+    const eqDelBtn = card.querySelector('.eq-del');
+    let eqGains = [];
+    let eqFreqs = [];
+    function renderBands() {
+      eqBandsWrap.innerHTML = '';
+      eqFreqs.forEach((f, idx) => {
+        const g = eqGains[idx] || 0;
+        const col = document.createElement('div');
+        col.style.cssText = 'flex:1;display:flex;flex-direction:column;align-items:center;min-width:32px;';
+        const lab = document.createElement('div'); lab.textContent = f>=1000 ? (f/1000)+'k' : f; lab.style.cssText='font-size:11px;margin-bottom:4px;color:#555;';
+        const slider = document.createElement('input');
+        slider.type = 'range'; slider.min = '-24'; slider.max = '24'; slider.step = '0.5'; slider.value = g;
+        slider.style.cssText='writing-mode:bt-lr;appearance:slider-vertical;height:90px;width:30px;';
+        const val = document.createElement('div'); val.textContent = g.toFixed(0)+'dB'; val.style.cssText='font-size:11px;margin-top:4px;color:#333;';
+        slider.addEventListener('input', (e)=>{ val.textContent = Number(e.target.value).toFixed(0)+'dB'; });
+        let debounceTimer=null;
+        slider.addEventListener('change', (e)=>{
+          const v = Number(e.target.value);
+          eqGains[idx]=v;
+          clearTimeout(debounceTimer);
+          debounceTimer=setTimeout(()=>{
+            sendToTab(tab.id,{type:'gmcx-eq-set-band', index: idx, value: v});
+          },120);
+        });
+        col.appendChild(lab); col.appendChild(slider); col.appendChild(val);
+        eqBandsWrap.appendChild(col);
+      });
+    }
+    async function loadEQ() {
+      const resp = await sendToTab(tab.id, {type:'gmcx-eq-init'});
+      if (!resp || !resp.ok) return;
+      eqFreqs = resp.freqs; eqGains = resp.gains;
+      // 预设
+      eqPresetSelect.innerHTML='';
+      const groupBuiltin = document.createElement('optgroup'); groupBuiltin.label='内置';
+      resp.builtin.forEach(p=>{ const o=document.createElement('option'); o.value=p.name; o.textContent=p.name; groupBuiltin.appendChild(o); });
+      eqPresetSelect.appendChild(groupBuiltin);
+      const groupCustom = document.createElement('optgroup'); groupCustom.label='自定义';
+      resp.custom.forEach(p=>{ const o=document.createElement('option'); o.value=p.name; o.textContent=p.name; groupCustom.appendChild(o); });
+      eqPresetSelect.appendChild(groupCustom);
+      eqDelBtn.style.display='none';
+      renderBands();
+    }
+    eqToggle.addEventListener('click', async ()=>{
+      if (eqPanel.style.display==='none') { eqPanel.style.display='block'; await loadEQ(); }
+      else { eqPanel.style.display='none'; }
+    });
+    eqPresetSelect.addEventListener('change', async (e)=>{
+      const name = e.target.value;
+      if (!name) return;
+      await sendToTab(tab.id, {type:'gmcx-eq-apply-preset', name});
+      // 重新获取当前状态
+      const st = await sendToTab(tab.id, {type:'gmcx-eq-get-state'});
+      if (st && st.ok) { eqGains = st.gains; renderBands(); }
+      // 判断删除按钮是否显示（自定义）
+      eqDelBtn.style.display = Array.from((e.target.querySelector('optgroup[label="自定义"]')||[]).children).some(o=>o.value===name) ? 'inline-block' : 'none';
+    });
+    eqSaveBtn.addEventListener('click', async ()=>{
+      const name = eqSaveName.value.trim();
+      const st = await sendToTab(tab.id,{type:'gmcx-eq-save-preset', name});
+      if (st && st.ok) { await loadEQ(); eqPresetSelect.value = st.name; eqDelBtn.style.display='inline-block'; }
+    });
+    eqDelBtn.addEventListener('click', async ()=>{
+      const name = eqPresetSelect.value; if (!name) return;
+      await sendToTab(tab.id,{type:'gmcx-eq-delete-preset', name});
+      await loadEQ();
+    });
     // 倍速选择
     const speedSelect = card.querySelector('.media-speed');
     const speedCustom = card.querySelector('.media-speed-custom');
@@ -278,6 +403,8 @@ function renderMediaList(mediaList) {
     observer.observe(document.documentElement, {childList: true, subtree: true});
     container.appendChild(card);
   }
+  // 首次完整渲染后淡入
+  container.classList.remove('preload-hidden');
 }
 
 let lastMediaList = [];
@@ -315,6 +442,10 @@ async function refreshMediaList(full = false) {
       if (playBtn) playBtn.textContent = info.paused ? '▶' : '⏸';
       const stateEl = card.querySelector('.media-state');
       if (stateEl) stateEl.textContent = info.paused ? '⏸ 暂停' : '▶ 播放';
+  const volIcon = card.querySelector('.vol-icon');
+  const volSlider = card.querySelector('.media-volume');
+  if (volIcon) volIcon.textContent = info.muted ? '🔇' : '🔊';
+  if (volSlider && !seekLocks.has(String(tab.id))) volSlider.value = info.volume != null ? info.volume : 1;
       // 倍速显示
       const speedSelect = card.querySelector('.media-speed');
       if (speedSelect) {
@@ -331,6 +462,7 @@ async function refreshMediaList(full = false) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  // 提前请求，渲染后移除隐藏状态
   refreshMediaList(true);
   refreshTimer = setInterval(() => refreshMediaList(false), 1000);
 });

@@ -18,6 +18,73 @@
     overlayHideTimer: null,
     overlayHideDelay: 2200
   };
+  // ====== EQ 状态 ======
+  const EQ = {
+    ctx: null,
+    sourceMap: new WeakMap(), // media -> {source, filters:[], gains:[]}
+    freqs: [60,170,400,1000,2500,6000,15000],
+    ranges: { min: -24, max: 24 },
+    builtinPresets: [
+      { name: 'Flat', gains: [0,0,0,0,0,0,0] },
+      { name: 'Bass Boost', gains: [8,6,4,1,0,-2,-4] },
+      { name: 'Vocal', gains: [-2,0,2,4,3,1,0] },
+      { name: 'Treble Boost', gains: [-4,-2,0,1,2,4,6] },
+      { name: 'Cinema', gains: [6,4,2,0,1,3,5] }
+    ],
+    customPresets: [],
+    loadedCustom: false
+  };
+  function ensureEQContext() {
+    if (!EQ.ctx) {
+      try { EQ.ctx = new (window.AudioContext || window.webkitAudioContext)(); }
+      catch { EQ.ctx = null; }
+    }
+    return EQ.ctx;
+  }
+  function ensureMediaEQ(media) {
+    const ctx = ensureEQContext();
+    if (!ctx) return null;
+    let entry = EQ.sourceMap.get(media);
+    if (entry) return entry;
+    try {
+      const source = ctx.createMediaElementSource(media);
+      const filters = EQ.freqs.map((f, idx) => {
+        const biquad = ctx.createBiquadFilter();
+        biquad.type = 'peaking';
+        biquad.frequency.value = f;
+        biquad.Q.value = 1.05;
+        biquad.gain.value = 0;
+        return biquad;
+      });
+      // 串联
+      filters.reduce((prev, cur) => { prev.connect(cur); return cur; }, source).connect(ctx.destination);
+      entry = { source, filters };
+      EQ.sourceMap.set(media, entry);
+      return entry;
+    } catch { return null; }
+  }
+  function applyGains(media, gains) {
+    const entry = ensureMediaEQ(media);
+    if (!entry) return false;
+    entry.filters.forEach((f, i) => {
+      if (typeof gains[i] === 'number') {
+        const g = Math.max(EQ.ranges.min, Math.min(EQ.ranges.max, gains[i]));
+        f.gain.value = g;
+      }
+    });
+    return true;
+  }
+  function loadCustomPresets(cb) {
+    if (EQ.loadedCustom) { cb && cb(); return; }
+    chrome.storage.sync.get({ eqCustomPresets: [] }, (cfg) => {
+      if (Array.isArray(cfg.eqCustomPresets)) EQ.customPresets = cfg.eqCustomPresets.filter(p => Array.isArray(p.gains) && p.gains.length === EQ.freqs.length);
+      EQ.loadedCustom = true;
+      cb && cb();
+    });
+  }
+  function saveCustomPresets() {
+    chrome.storage.sync.set({ eqCustomPresets: EQ.customPresets.slice(0,40) });
+  }
   chrome.storage.sync.get({ seekStep: 5, speedStep: 0.25 }, (cfg) => {
     STATE.seekStep = Number(cfg.seekStep) || 5;
     STATE.speedStep = Number(cfg.speedStep) || 0.25;
@@ -376,13 +443,18 @@
     if (editable) return;
     if (e.altKey && e.shiftKey) {
       switch (e.code) {
-        case 'ArrowRight': seekBy(STATE.seekStep); e.preventDefault(); break;
-        case 'ArrowLeft':  seekBy(-STATE.seekStep); e.preventDefault(); break;
-        case 'ArrowUp':    adjustRate(STATE.speedStep); e.preventDefault(); break;
-        case 'ArrowDown':  adjustRate(-STATE.speedStep); e.preventDefault(); break;
         case 'KeyK':       togglePlay(); e.preventDefault(); break;
         case 'KeyL':       seekBy(STATE.seekStep); e.preventDefault(); break;
         case 'KeyJ':       seekBy(-STATE.seekStep); e.preventDefault(); break;
+        case 'KeyM': { // 静音/取消静音
+          const media = getActiveMedia();
+          if (media) {
+            media.muted = !media.muted;
+            updateLocalOverlay({actionLabel: media.muted ? '静音' : '取消静音'});
+          }
+          e.preventDefault();
+          break;
+        }
         case 'KeyU': { // 全局加速
           chrome.runtime.sendMessage({type:'gmcx-global-speed', action:'up'}); e.preventDefault(); break; }
         case 'KeyO': { // 全局减速
@@ -392,11 +464,10 @@
         case 'KeyP': { // 循环预设
           chrome.runtime.sendMessage({type:'gmcx-global-speed', action:'cycle'}); e.preventDefault(); break; }
         case 'KeyS':       screenshotVideo(); e.preventDefault(); break;
-        case 'KeyM': { // 备用：与 cycle-video 命令一致
+        case 'KeyV': { // 切换视频
           cycleSelectedMedia();
           e.preventDefault();
-          break;
-        }
+          break; }
       }
     }
     // 无修饰键时的线性微调：按住 A / D (或 H / L) 实现连续微调
@@ -487,6 +558,99 @@
       sendResponse({ ok: true });
       return;
     }
+    if (msg?.type === 'gmcx-mute-media') {
+      const media = getActiveMedia();
+      if (media) media.muted = true;
+      sendResponse({ok:true});
+      return;
+    }
+    if (msg?.type === 'gmcx-unmute-media') {
+      const media = getActiveMedia();
+      if (media) media.muted = false;
+      sendResponse({ok:true});
+      return;
+    }
+    if (msg?.type === 'gmcx-set-media-volume') {
+      const media = getActiveMedia();
+      if (media) {
+        const vol = Math.min(1, Math.max(0, Number(msg.value)));
+        media.volume = vol;
+        if (vol > 0 && media.muted) media.muted = false;
+      }
+      sendResponse({ok:true});
+      return;
+    }
+    // ===== EQ 消息处理 =====
+    if (msg?.type === 'gmcx-eq-init') {
+      loadCustomPresets(() => {
+        const media = getActiveMedia();
+        if (!media) { sendResponse({ok:false}); return; }
+        ensureMediaEQ(media);
+        const gains = (EQ.sourceMap.get(media)?.filters || []).map(f => f.gain.value);
+        sendResponse({ok:true, freqs: EQ.freqs, gains, builtin: EQ.builtinPresets, custom: EQ.customPresets});
+      });
+      return true;
+    }
+    if (msg?.type === 'gmcx-eq-get-state') {
+      const media = getActiveMedia();
+      if (!media) { sendResponse({ok:false}); return; }
+      const entry = ensureMediaEQ(media);
+      const gains = entry ? entry.filters.map(f => f.gain.value) : EQ.freqs.map(()=>0);
+      sendResponse({ok:true, gains});
+      return;
+    }
+    if (msg?.type === 'gmcx-eq-set-band') {
+      const media = getActiveMedia();
+      if (!media) { sendResponse({ok:false}); return; }
+      const entry = ensureMediaEQ(media);
+      if (!entry) { sendResponse({ok:false}); return; }
+      const { index, value } = msg;
+      if (typeof index === 'number' && entry.filters[index]) {
+        const v = Math.max(EQ.ranges.min, Math.min(EQ.ranges.max, Number(value)));
+        entry.filters[index].gain.value = v;
+      }
+      sendResponse({ok:true});
+      return;
+    }
+    if (msg?.type === 'gmcx-eq-apply-preset') {
+      const media = getActiveMedia();
+      if (!media) { sendResponse({ok:false}); return; }
+      const name = msg.name;
+      loadCustomPresets(() => {
+        const preset = [...EQ.builtinPresets, ...EQ.customPresets].find(p => p.name === name);
+        if (!preset) { sendResponse({ok:false}); return; }
+        applyGains(media, preset.gains);
+        sendResponse({ok:true});
+      });
+      return true;
+    }
+    if (msg?.type === 'gmcx-eq-save-preset') {
+      const media = getActiveMedia();
+      if (!media) { sendResponse({ok:false}); return; }
+      const entry = ensureMediaEQ(media);
+      if (!entry) { sendResponse({ok:false}); return; }
+      const gains = entry.filters.map(f => f.gain.value);
+      loadCustomPresets(() => {
+        const name = String(msg.name || '').trim().slice(0,40) || ('Preset'+Date.now());
+        // 覆盖同名
+        const existIdx = EQ.customPresets.findIndex(p => p.name === name);
+        if (existIdx >= 0) EQ.customPresets[existIdx] = {name, gains};
+        else EQ.customPresets.push({name, gains});
+        saveCustomPresets();
+        sendResponse({ok:true, name});
+      });
+      return true;
+    }
+    if (msg?.type === 'gmcx-eq-delete-preset') {
+      loadCustomPresets(() => {
+        const name = msg.name;
+        const before = EQ.customPresets.length;
+        EQ.customPresets = EQ.customPresets.filter(p => p.name !== name);
+        if (EQ.customPresets.length !== before) saveCustomPresets();
+        sendResponse({ok:true});
+      });
+      return true;
+    }
     if (msg?.type === 'gmcx-seek-media') {
       const media = getActiveMedia();
       if (media && isFinite(media.duration)) {
@@ -560,7 +724,9 @@
         rawCurrentTime: media.currentTime,
         rawDuration: media.duration,
         playbackRate: media.playbackRate,
-        thumbnail
+        thumbnail,
+        muted: media.muted,
+        volume: media.volume
       });
       return;
     }

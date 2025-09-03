@@ -1,5 +1,6 @@
 body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;padding:16px 18px;width:320px;background:#f7f8fa}
-#media-list{font-size:15px}
+#media-list{font-size:15px;transition:opacity .18s ease;}
+#media-list.preload-hidden{opacity:0;}
 #no-media{color:#888;text-align:center;padding:32px 0}
 .media-card{background:#fff;border-radius:14px;box-shadow:0 4px 18px rgba(0,0,0,.08);padding:18px 16px;margin-bottom:18px;transition:box-shadow .18s}
 .media-card:hover{box-shadow:0 8px 32px rgba(0,0,0,.13)}
@@ -18,37 +19,31 @@ body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;pad
 	margin-right: 12px;
 	box-shadow: 0 2px 8px rgba(0,0,0,.08);
 }
-.media-controls {
-	display: flex;
-	gap: 8px;
-	margin-bottom: 8px;
-	align-items: center;
+.media-controls {display:flex;gap:6px;margin-bottom:8px;align-items:center;flex-wrap:wrap;}
+/* 第一行控件：不允许换行，超出时压缩 */
+.media-controls-row1 {flex-wrap:nowrap !important;white-space:nowrap;}
+.media-controls-row1 .media-btn {flex:0 0 auto;}
+.media-controls-row1 .media-speed {flex:0 0 auto;max-width:86px;}
+.media-controls-row1 .media-speed-custom {flex:0 0 64px;}
+/* 当空间不足时，缩小 select 与按钮内边距 */
+@media (max-width:340px){
+  .media-controls-row1 {gap:4px;}
+  .media-controls-row1 .media-btn {padding:5px 8px;font-size:13px;}
+  .media-controls-row1 .media-speed {padding:3px 6px;font-size:13px;}
+  .media-controls-row1 .media-speed-custom {padding:3px 4px;font-size:13px;}
 }
-.media-btn {
-	background: #f0f3fa;
-	border: none;
-	border-radius: 6px;
-	padding: 6px 10px;
-	font-size: 15px;
-	cursor: pointer;
-	transition: background .15s;
-}
-.media-btn:hover {
-	background: #e0e7f5;
-}
-.media-speed {
-	margin-left: 8px;
-	padding: 4px 8px;
-	border-radius: 6px;
-	border: 1px solid #d0d7e5;
-	background: #f7f8fa;
-	font-size: 14px;
-}
-.media-reset {
-	margin-left: 8px;
-	background: #ffe0e0;
-	color: #d00;
-}
-.media-reset:hover {
-	background: #ffd0d0;
-}
+.media-controls.speed-row {margin-top:-4px;}
+.media-controls.speed-row .media-speed {flex:0 0 110px;}
+.media-controls.speed-row .media-speed-custom {flex:0 0 70px;}
+.media-btn {background:#f0f3fa;border:1px solid #e2e6ef;border-radius:6px;padding:6px 10px;font-size:14px;cursor:pointer;transition:background .15s,box-shadow .15s;min-width:40px;line-height:1;text-align:center;display:inline-flex;align-items:center;justify-content:center;}
+.media-btn:hover {background:#e0e7f5;}
+.media-btn:active {background:#d4dced;box-shadow:0 0 0 2px rgba(89,132,255,.15) inset;}
+.media-btn.media-play {font-weight:500;}
+.media-speed {margin-left:8px;padding:4px 8px;border-radius:6px;border:1px solid #d0d7e5;background:#f7f8fa;font-size:14px;height:32px;box-sizing:border-box;}
+.media-reset {margin-left:2px;background:#eef1f6;color:#333;border:1px solid #d5dae2;}
+.media-reset:hover {background:#e2e7ef;}
+.media-audio-group {display:flex;align-items:center;gap:4px;min-width:110px;padding:2px 4px;background:#f1f4fa;border-radius:6px;}
+.media-audio-group .vol-icon {cursor:pointer;font-size:16px;line-height:1;user-select:none;}
+.media-audio-group .media-volume {width:70px;cursor:pointer;}
+/* EQ 面板附加样式（保持紧凑） */
+.eq-panel input[type=range][orient=vertical] { writing-mode: bt-lr; }

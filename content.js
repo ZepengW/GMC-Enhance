@@ -14,7 +14,9 @@
     fineSeekTimer: null,
     fineSeekStep: 0.2, // 无级细微拖动步长（秒）
     lastMediaWeak: null,
-    fineOverlayEl: null
+    fineOverlayEl: null,
+    overlayHideTimer: null,
+    overlayHideDelay: 2200
   };
   chrome.storage.sync.get({ seekStep: 5, speedStep: 0.25 }, (cfg) => {
     STATE.seekStep = Number(cfg.seekStep) || 5;
@@ -164,6 +166,31 @@
     clearTimeout(STATE.hudTimer);
     STATE.hudTimer = setTimeout(() => { el.style.opacity = '0'; }, ms);
   }
+  // 统一：本地控制也使用底部 fine overlay，而不再使用顶部 HUD 文本
+  function updateLocalOverlay(extra = {}) {
+    const media = getActiveMedia();
+    if (!media) return;
+    const el = ensureFineOverlay();
+    el.wrap.style.opacity = '1';
+    const cur = media.currentTime || 0;
+    const durRaw = isFinite(media.duration) ? media.duration : cur + 1;
+    const pct = durRaw ? (cur / durRaw) * 100 : 0;
+    el.barFill.style.width = pct.toFixed(3) + '%';
+    el.barFill.style.background = 'linear-gradient(90deg,#4facfe,#00f2fe)';
+    el.left.textContent = formatTime(cur);
+    el.right.textContent = isFinite(media.duration) ? formatTime(media.duration) : '--:--';
+    // 中间显示：播放状态 + 速率 或 额外提示
+    let center = '';
+    if (media.paused) center += '⏸ ';
+    else center += '▶ ';
+    center += (extra.actionLabel ? (extra.actionLabel + ' · ') : '');
+    center += (media.playbackRate ? media.playbackRate.toFixed(2) + 'x' : '1.00x');
+    el.center.textContent = center;
+    // 侧向轮播（本地仅当前，不显示左右）
+    if (el.prev) el.prev.textContent = '';
+    if (el.next) el.next.textContent = '';
+    resetOverlayAutoHide();
+  }
   function formatTime(t) {
     if (!isFinite(t)) return '--:--';
     t = Math.floor(t);
@@ -173,32 +200,33 @@
   }
   function seekBy(deltaSec) {
     const media = getActiveMedia();
-    if (!media) return showHUD('未找到媒体');
+    if (!media) { showHUD('未找到媒体'); return; }
     try {
       const next = media.currentTime + deltaSec;
       media.currentTime = Math.max(0, Math.min(isFinite(media.duration) ? media.duration : next, next));
-      showHUD(`${deltaSec>=0? '快进':'快退'} ${Math.abs(deltaSec)}s → ${formatTime(media.currentTime)}`);
+      updateLocalOverlay({actionLabel: `${deltaSec>=0? '快进':'快退'} ${Math.abs(deltaSec)}s`});
     } catch { showHUD('无法快进/快退'); }
   }
   function setRate(rate) {
     const media = getActiveMedia();
-    if (!media) return showHUD('未找到媒体');
+    if (!media) { showHUD('未找到媒体'); return; }
     rate = Math.max(0.06, Math.min(16, rate));
     media.playbackRate = rate;
-    showHUD(`速度 ${rate.toFixed(2)}×`);
+    updateLocalOverlay({actionLabel: `速度 ${rate.toFixed(2)}×`});
   }
   function adjustRate(delta) {
     const media = getActiveMedia();
-    if (!media) return showHUD('未找到媒体');
+    if (!media) { showHUD('未找到媒体'); return; }
     const newRate = Math.max(0.06, Math.min(16, (media.playbackRate || 1) + delta));
     media.playbackRate = newRate;
-    showHUD(`速度 ${newRate.toFixed(2)}×`);
+    updateLocalOverlay({actionLabel: `速度 ${newRate.toFixed(2)}×`});
   }
   function togglePlay() {
     const media = getActiveMedia();
-    if (!media) return showHUD('未找到媒体');
-    if (media.paused) { media.play?.(); showHUD('▶ 播放'); }
-    else { media.pause?.(); showHUD('⏸ 暂停'); }
+    if (!media) { showHUD('未找到媒体'); return; }
+    if (media.paused) { media.play?.(); }
+    else { media.pause?.(); }
+    updateLocalOverlay({actionLabel: media.paused ? '暂停' : '播放'});
   }
   async function saveBlob(blob, filename) {
     const url = URL.createObjectURL(blob);
@@ -254,7 +282,7 @@
     idx = (idx + 1) % STATE.speedCycleList.length;
     const next = STATE.speedCycleList[idx];
     media.playbackRate = next;
-    showHUD(`速度 ${next.toFixed(2)}×`);
+    updateLocalOverlay({actionLabel: `速度 ${next.toFixed(2)}×`});
   }
 
   function startFineSeek(dir) {
@@ -300,11 +328,20 @@
     const center = document.createElement('span');
     const right = document.createElement('span');
     label.appendChild(left); label.appendChild(center); label.appendChild(right);
+    // 侧向轮播预览容器
+    const carousel = document.createElement('div');
+    carousel.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-top:6px;opacity:.85;font-size:11px;gap:12px;';
+    const prev = document.createElement('div');
+    const next = document.createElement('div');
+    prev.style.cssText = 'flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.6;text-align:left;';
+    next.style.cssText = 'flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.6;text-align:right;';
+    carousel.appendChild(prev); carousel.appendChild(next);
     barOuter.appendChild(barFill);
     wrap.appendChild(label);
     wrap.appendChild(barOuter);
+    wrap.appendChild(carousel);
     document.documentElement.appendChild(wrap);
-    STATE.fineOverlayEl = { wrap, barFill, left, center, right };
+    STATE.fineOverlayEl = { wrap, barFill, left, center, right, prev, next };
     return STATE.fineOverlayEl;
   }
   function updateFineOverlay(media) {
@@ -317,10 +354,21 @@
     el.left.textContent = formatTime(cur);
     el.right.textContent = isFinite(media.duration) ? formatTime(media.duration) : '--:--';
     el.center.textContent = `微调 ${STATE.fineSeekDir>0?'+':'-'}${STATE.fineSeekStep.toFixed(2)}s`; // 中间显示步长方向
+    resetOverlayAutoHide();
   }
   function hideFineOverlay() {
     if (!STATE.fineOverlayEl) return;
     STATE.fineOverlayEl.wrap.style.opacity = '0';
+    // 通知后台覆盖层已隐藏，用于恢复到本页优先控制
+    try { chrome.runtime.sendMessage({type:'gmcx-overlay-hidden'}); } catch {}
+  }
+  function resetOverlayAutoHide() {
+    clearTimeout(STATE.overlayHideTimer);
+    STATE.overlayHideTimer = setTimeout(() => {
+      // 若正在微调，不隐藏（可选策略：即使微调也隐藏；当前保留）
+      if (STATE.fineSeekActive) return;
+      hideFineOverlay();
+    }, STATE.overlayHideDelay);
   }
 
   window.addEventListener('keydown', (e) => {
@@ -410,6 +458,20 @@
         } else {
           el.barFill.style.background = 'linear-gradient(90deg,#4facfe,#00f2fe)';
         }
+        // 侧向预览：需要 payload 中给出 index / total，后台可已提供
+        if (typeof p.index === 'number' && typeof p.total === 'number' && p.total > 1) {
+          const total = p.total;
+            const cur = p.index - 1;
+          const prevIdx = (cur - 1 + total) % total;
+          const nextIdx = (cur + 1) % total;
+          // 后台尚未传递其他媒体标题，先用简化占位（可拓展后台传 prevTitle/nextTitle）
+          if (el.prev) el.prev.textContent = `◀ ${(prevIdx+1)}/${total}`;
+          if (el.next) el.next.textContent = `${(nextIdx+1)}/${total} ▶`;
+        } else {
+          if (el.prev) el.prev.textContent = '';
+          if (el.next) el.next.textContent = '';
+        }
+        resetOverlayAutoHide();
         return true;
       }
     }

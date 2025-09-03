@@ -13,7 +13,8 @@ const GLOBAL_MEDIA = {
   pendingRefreshAfterSwitch: false,
   speedStep: 0.25,
   speedPresets: [0.75, 1, 1.25, 1.5, 2],
-  speedPresetIndex: 1
+  speedPresetIndex: 1,
+  forceGlobal: false // 在用户使用 cycle-video 后强制使用全局控制
 };
 
 function sendToContent(tabId, msg) {
@@ -73,17 +74,50 @@ async function cycleGlobalSelection() {
   GLOBAL_MEDIA.seekAccumDelta = 0;
   GLOBAL_MEDIA.baseTime = null; // 切换后延后获取
   GLOBAL_MEDIA.pendingRefreshAfterSwitch = true;
-  overlayUpdateOnActive({
-    mode:'select',
-    index: GLOBAL_MEDIA.selectedIndex + 1,
-    total: list.length,
-    title: (tab.title || tab.url || '').slice(0,80),
-    paused: info.paused,
-    duration: info.duration,
-    currentTime: '--:--', // 切换时不即时获取
-    percent: 0,
-    preview: true
-  });
+  // 立即尝试获取最新状态（而不是使用占位），提升直观性
+  try {
+    const fresh = await sendToTab(tab.id, {type:'gmcx-get-media-info'});
+    if (fresh && fresh.ok) {
+      overlayUpdateOnActive({
+        mode:'select',
+        index: GLOBAL_MEDIA.selectedIndex + 1,
+        total: list.length,
+        title: (tab.title || tab.url || '').slice(0,80),
+        paused: fresh.paused,
+        duration: fresh.duration,
+        currentTime: fresh.currentTime,
+        percent: fresh.rawDuration ? (fresh.rawCurrentTime / fresh.rawDuration) * 100 : 0,
+        preview: false,
+        playbackRate: fresh.playbackRate
+      });
+      GLOBAL_MEDIA.baseTime = fresh.rawCurrentTime; // 直接设置基准
+    } else {
+      overlayUpdateOnActive({
+        mode:'select',
+        index: GLOBAL_MEDIA.selectedIndex + 1,
+        total: list.length,
+        title: (tab.title || tab.url || '').slice(0,80),
+        paused: info.paused,
+        duration: info.duration,
+        currentTime: '--:--',
+        percent: 0,
+        preview: true
+      });
+    }
+  } catch {
+    overlayUpdateOnActive({
+      mode:'select',
+      index: GLOBAL_MEDIA.selectedIndex + 1,
+      total: list.length,
+      title: (tab.title || tab.url || '').slice(0,80),
+      paused: info.paused,
+      duration: info.duration,
+      currentTime: '--:--',
+      percent: 0,
+      preview: true
+    });
+  }
+  GLOBAL_MEDIA.forceGlobal = true; // 用户显式切换后进入全局优先模式
 }
 
 async function ensureBaseTime() {
@@ -258,19 +292,24 @@ chrome.commands.onCommand.addListener(async (command) => {
     return;
   }
   if (['seek-forward','seek-back','toggle-play-pause'].includes(command)) {
-    // 确保媒体列表存在（懒加载）
+    if (!GLOBAL_MEDIA.forceGlobal) {
+      // 本地优先模式
+      const localInfo = await sendToTab(tab.id, {type:'gmcx-get-media-info'});
+      if (localInfo && localInfo.ok) {
+        if (command === 'toggle-play-pause') {
+          if (localInfo.paused) await sendToTab(tab.id, {type:'gmcx-play-media'}); else await sendToTab(tab.id, {type:'gmcx-pause-media'});
+          return;
+        }
+        if (command === 'seek-forward') { await sendToTab(tab.id, {type:'gmcx-seek-media', value: +5}); return; }
+        if (command === 'seek-back') { await sendToTab(tab.id, {type:'gmcx-seek-media', value: -5}); return; }
+      }
+    }
+    // 全局模式（或本地没有媒体 / 已 forceGlobal ）
     await scanMediaAcrossTabs();
     if (GLOBAL_MEDIA.selectedIndex >= 0) {
-      if (command === 'toggle-play-pause') {
-        await togglePlayGlobal();
-        return;
-      } else if (command === 'seek-forward') {
-        await accumulateSeek(+5); // 使用默认 5s，可改为用户配置
-        return;
-      } else if (command === 'seek-back') {
-        await accumulateSeek(-5);
-        return;
-      }
+      if (command === 'toggle-play-pause') { await togglePlayGlobal(); return; }
+      if (command === 'seek-forward') { await accumulateSeek(+5); return; }
+      if (command === 'seek-back') { await accumulateSeek(-5); return; }
     }
   }
   // 回落到本页局部控制
@@ -298,5 +337,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       sendResponse({ok:false});
     })();
     return true;
+  }
+  if (msg?.type === 'gmcx-overlay-hidden') {
+    // 覆盖层隐藏后恢复为本地优先模式
+    GLOBAL_MEDIA.forceGlobal = false;
+    sendResponse && sendResponse({ok:true});
+    return; // 不需要异步
   }
 });

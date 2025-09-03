@@ -58,7 +58,7 @@
     },
     "cycle-video": {
       "suggested_key": {
-        "default": "Alt+Shift+M"
+        "default": "Alt+Shift+V"
       },
       "description": "切换当前控制的视频"
     }

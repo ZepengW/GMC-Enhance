@@ -1,6 +1,6 @@
 # GMC-Enhance
 
-Global Media Control (GMC)-Enhanced is a browser extension designed to enhance the functionality of the Global Media Control feature in modern browsers. It provides a unified interface and additional features for managing media playback across multiple tabs and windows, making media control more intuitive and efficient.
+Global Media Control (GMC)-Enhanced is a chrome extension designed to enhance the functionality of the Global Media Control feature in chrome. It provides a unified interface and additional features for managing media playback across multiple tabs and windows, making media control more intuitive and efficient.
 
 ![Logo](docs\imgs\banner.png)
 

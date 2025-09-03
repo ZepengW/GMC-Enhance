@@ -37,6 +37,10 @@ function formatTabTitle(tab) {
 
 // 正在被用户拖动进度条的 tabId 集合（锁）
 const seekLocks = new Set();
+// 快进/快退点击累积：记录 { tabId: { pending:number, timer:TimeoutID, base:number } }
+const seekAccum = new Map();
+// 累积提交延迟（毫秒）——在此时间内继续点击会继续累加，不会真正发送 seek
+const SEEK_ACCUM_DEBOUNCE = 480; // 可按需调整
 
 function renderMediaList(mediaList) {
   const container = document.getElementById('media-list');
@@ -103,15 +107,54 @@ function renderMediaList(mediaList) {
         refreshMediaList();
       }
     });
-    // 前进/后退
-    card.querySelector('.media-back').addEventListener('click', async () => {
-      await sendToTab(tab.id, {type: 'gmcx-seek-media', value: -10}); // 后退10秒
-      refreshMediaList();
-    });
-    card.querySelector('.media-forward').addEventListener('click', async () => {
-      await sendToTab(tab.id, {type: 'gmcx-seek-media', value: 10}); // 前进10秒
-      refreshMediaList();
-    });
+    // 前进/后退（点击累积逻辑）
+  const backBtn = card.querySelector('.media-back');
+  const fwdBtn = card.querySelector('.media-forward');
+  const getSeekBar = () => card.querySelector('.seek-bar');
+  const getTimeEl = () => card.querySelector('.media-time');
+
+    function scheduleSeekCommit(tabId) {
+      const entry = seekAccum.get(tabId);
+      if (!entry) return;
+      clearTimeout(entry.timer);
+      entry.timer = setTimeout(async () => {
+        // 提交阶段：上锁，发送最终 seek，然后刷新
+        const delta = entry.pending;
+        seekAccum.delete(tabId);
+        if (delta === 0) return;
+        // 发送 seek（使用 gmcx-seek-media 增量跳转）
+        await sendToTab(tabId, {type: 'gmcx-seek-media', value: delta});
+        // 解锁预览，刷新真实信息
+        refreshMediaList(false);
+      }, SEEK_ACCUM_DEBOUNCE);
+    }
+
+    function accumulateSeek(tabId, delta) {
+      // 如果正在拖动进度条，则直接忽略按钮操作（避免逻辑冲突）
+      if (seekLocks.has(String(tabId))) return;
+      let entry = seekAccum.get(tabId);
+      if (!entry) {
+        // 以当前渲染时的 rawCurrentTime 作为基准
+        const currentRaw = Number(card.querySelector('.seek-bar')?.value || 0);
+        entry = { pending: 0, timer: null, base: currentRaw };
+        seekAccum.set(tabId, entry);
+      }
+      entry.pending += delta;
+      // 预览：本地更新 seekBar 与时间（不发送消息）
+  const sb = getSeekBar();
+      if (sb) {
+        const duration = Number(sb.max) || entry.base + entry.pending; // 防止 NaN
+        let preview = entry.base + entry.pending;
+        if (isFinite(duration)) preview = Math.min(Math.max(0, preview), duration);
+        sb.value = preview;
+  const tEl = getTimeEl();
+        if (tEl) tEl.textContent = formatTimeLocal(preview);
+      }
+      scheduleSeekCommit(tabId);
+    }
+
+    backBtn.addEventListener('click', () => accumulateSeek(tab.id, -10));
+    fwdBtn.addEventListener('click', () => accumulateSeek(tab.id, 10));
     // 倍速选择
     const speedSelect = card.querySelector('.media-speed');
     const speedCustom = card.querySelector('.media-speed-custom');

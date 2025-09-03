@@ -9,3 +9,46 @@ body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;pad
 .media-title{font-size:14px;color:#333;margin-bottom:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .media-progress{font-size:13px;color:#666;margin-bottom:8px}
 .seek-bar{width:100%;margin:0}
+/* 新增缩略图和控件样式 */
+.media-thumb {
+	width: 80px;
+	height: 48px;
+	object-fit: cover;
+	border-radius: 8px;
+	margin-right: 12px;
+	box-shadow: 0 2px 8px rgba(0,0,0,.08);
+}
+.media-controls {
+	display: flex;
+	gap: 8px;
+	margin-bottom: 8px;
+	align-items: center;
+}
+.media-btn {
+	background: #f0f3fa;
+	border: none;
+	border-radius: 6px;
+	padding: 6px 10px;
+	font-size: 15px;
+	cursor: pointer;
+	transition: background .15s;
+}
+.media-btn:hover {
+	background: #e0e7f5;
+}
+.media-speed {
+	margin-left: 8px;
+	padding: 4px 8px;
+	border-radius: 6px;
+	border: 1px solid #d0d7e5;
+	background: #f7f8fa;
+	font-size: 14px;
+}
+.media-reset {
+	margin-left: 8px;
+	background: #ffe0e0;
+	color: #d00;
+}
+.media-reset:hover {
+	background: #ffd0d0;
+}

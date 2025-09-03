@@ -154,16 +154,40 @@
     }
   }, true);
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    if (msg?.type === 'gmcx-command') {
-      switch (msg.command) {
-        case 'toggle-play-pause': togglePlay(); break;
-        case 'seek-forward': seekBy(STATE.seekStep); break;
-        case 'seek-back': seekBy(-STATE.seekStep); break;
-        case 'speed-up': adjustRate(STATE.speedStep); break;
-        case 'speed-down': adjustRate(-STATE.speedStep); break;
-        case 'speed-reset': setRate(1.0); break;
-        case 'screenshot': screenshotVideo(); break;
+    // 新增：支持 popup.js 控制消息
+    if (msg?.type === 'gmcx-play-media') {
+      const media = getActiveMedia();
+      if (media && media.paused) media.play?.();
+      sendResponse({ ok: true });
+      return;
+    }
+    if (msg?.type === 'gmcx-pause-media') {
+      const media = getActiveMedia();
+      if (media && !media.paused) media.pause?.();
+      sendResponse({ ok: true });
+      return;
+    }
+    if (msg?.type === 'gmcx-seek-media') {
+      const media = getActiveMedia();
+      if (media && isFinite(media.duration)) {
+        media.currentTime = Math.max(0, Math.min(media.duration, media.currentTime + Number(msg.value)));
       }
+      sendResponse({ ok: true });
+      return;
+    }
+    if (msg?.type === 'gmcx-set-media-speed') {
+      const media = getActiveMedia();
+      if (media) media.playbackRate = Number(msg.value);
+      sendResponse({ ok: true });
+      return;
+    }
+    if (msg?.type === 'gmcx-reset-media') {
+      const media = getActiveMedia();
+      if (media) {
+        media.currentTime = 0;
+        media.playbackRate = 1.0;
+      }
+      sendResponse({ ok: true });
       return;
     }
     if (msg?.type === 'gmcx-get-media-info') {
@@ -202,6 +226,11 @@
       const paused = !!media.paused;
       const currentTime = formatTime(media.currentTime);
       const duration = formatTime(media.duration);
+      // 获取视频 poster 作为缩略图
+      let thumbnail = '';
+      if (type === 'video') {
+        thumbnail = media.poster || '';
+      }
       sendResponse({
         ok: true,
         type,
@@ -209,7 +238,9 @@
         currentTime,
         duration,
         rawCurrentTime: media.currentTime,
-        rawDuration: media.duration
+        rawDuration: media.duration,
+        playbackRate: media.playbackRate,
+        thumbnail
       });
       return;
     }

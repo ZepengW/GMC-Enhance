@@ -62,7 +62,18 @@ function renderMediaList(mediaList) {
   }
 }
 
-document.addEventListener('DOMContentLoaded', async () => {
+
+let refreshTimer = null;
+async function refreshMediaList() {
   const mediaList = await getAllMediaInfo();
   renderMediaList(mediaList);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  refreshMediaList();
+  refreshTimer = setInterval(refreshMediaList, 1000);
+});
+
+window.addEventListener('unload', () => {
+  if (refreshTimer) clearInterval(refreshTimer);
 });

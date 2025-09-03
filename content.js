@@ -146,6 +146,11 @@
       return;
     }
     if (msg?.type === 'gmcx-get-media-info') {
+      // 仅顶层页面返回媒体信息，避免 iframe 重复
+      if (window.top !== window.self) {
+        sendResponse({ ok: false });
+        return;
+      }
       const media = getActiveMedia();
       if (!media) {
         sendResponse({ ok: false });

@@ -55,30 +55,12 @@
         "default": "Alt+Shift+J"
       },
       "description": "快退（默认 -5s）"
+    },
+    "cycle-video": {
+      "suggested_key": {
+        "default": "Alt+Shift+M"
+      },
+      "description": "切换当前控制的视频"
     }
-    // "speed-up": {
-    //   "suggested_key": {
-    //     "default": "Alt+Shift+I"
-    //   },
-    //   "description": "加速（默认 +0.25x）"
-    // },
-    // "speed-down": {
-    //   "suggested_key": {
-    //     "default": "Alt+Shift+U"
-    //   },
-    //   "description": "减速（默认 -0.25x）"
-    // },
-    // "speed-reset": {
-    //   "suggested_key": {
-    //     "default": "Alt+Shift+O"
-    //   },
-    //   "description": "重置倍速（1.0x）"
-    // },
-    // "screenshot": {
-    //   "suggested_key": {
-    //     "default": "Alt+Shift+S"
-    //   },
-    //   "description": "截图当前视频帧"
-    // }
   }
 }

@@ -5,6 +5,15 @@ function sendToTab(tabId, msg) {
   });
 }
 
+// 时间格式化，与 content.js 保持一致（必要时可抽取共用）
+function formatTimeLocal(t) {
+  if (!isFinite(t)) return '--:--';
+  t = Math.floor(t);
+  const s = t % 60, m = Math.floor((t / 60) % 60), h = Math.floor(t / 3600);
+  if (h) return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+  return `${m}:${String(s).padStart(2,'0')}`;
+}
+
 async function getAllMediaInfo() {
   return new Promise((resolve) => {
     chrome.tabs.query({}, async (tabs) => {
@@ -26,6 +35,9 @@ function formatTabTitle(tab) {
   return title;
 }
 
+// 正在被用户拖动进度条的 tabId 集合（锁）
+const seekLocks = new Set();
+
 function renderMediaList(mediaList) {
   const container = document.getElementById('media-list');
   container.innerHTML = '';
@@ -36,6 +48,7 @@ function renderMediaList(mediaList) {
   for (const {tab, info} of mediaList) {
     const card = document.createElement('div');
     card.className = 'media-card';
+    card.dataset.tabId = tab.id; // 用于后续刷新时定位
     // 缩略图（仅视频）
     let thumbHtml = '';
     if (info.type === 'video') {
@@ -153,18 +166,73 @@ function renderMediaList(mediaList) {
       if (customOption) customOption.textContent = '自定义';
       refreshMediaList();
     });
-    // 进度条
-    card.querySelector('.seek-bar').addEventListener('input', async (e) => {
-      const val = Number(e.target.value);
-      await sendToTab(tab.id, {type: 'gmcx-set-media-currentTime', value: val});
-      // 刷新当前卡片进度
-      const updated = await sendToTab(tab.id, {type: 'gmcx-get-media-info'});
-      if (updated && updated.ok) {
-        card.querySelector('.media-time').textContent = updated.currentTime;
-        card.querySelector('.media-duration').textContent = updated.duration;
-        card.querySelector('.seek-bar').value = updated.rawCurrentTime;
+    // 进度条（增加拖动锁逻辑）
+    const seekBar = card.querySelector('.seek-bar');
+    const timeEl = card.querySelector('.media-time');
+
+    let dragging = false; // 仅在该组件生命周期内的局部状态
+
+    const startDrag = () => {
+      dragging = true;
+      seekLocks.add(String(tab.id));
+    };
+    const endDrag = async (finalVal) => {
+      if (!dragging) return;
+      try {
+        await sendToTab(tab.id, {type: 'gmcx-set-media-currentTime', value: finalVal});
+        // 松开后立即获取一次最新状态（精确同步）
+        const updated = await sendToTab(tab.id, {type: 'gmcx-get-media-info'});
+        if (updated && updated.ok) {
+          timeEl.textContent = updated.currentTime;
+          seekBar.value = updated.rawCurrentTime;
+        }
+      } finally {
+        dragging = false;
+        seekLocks.delete(String(tab.id));
+        // 释放锁后刷新整个列表该卡片其余状态（避免拖动期间错过的暂停/播放变化）
+        refreshMediaList(false);
+      }
+    };
+
+    // PC 鼠标事件
+    seekBar.addEventListener('mousedown', () => startDrag());
+    // 拖动中仅本地更新显示，不发送消息
+    seekBar.addEventListener('input', (e) => {
+      if (dragging) {
+        const val = Number(e.target.value);
+        timeEl.textContent = formatTimeLocal(val);
       }
     });
+    // mouseup 可能发生在窗口内或外，绑定 window 以确保释放
+    const mouseupHandler = (e) => {
+      if (!dragging) return;
+      // 最终值
+      const finalVal = Number(seekBar.value);
+      endDrag(finalVal);
+    };
+    window.addEventListener('mouseup', mouseupHandler);
+    // Touch 事件（预防触摸设备）
+    seekBar.addEventListener('touchstart', () => startDrag(), {passive: true});
+    seekBar.addEventListener('touchmove', (e) => {
+      if (dragging) {
+        const val = Number(seekBar.value);
+        timeEl.textContent = formatTimeLocal(val);
+      }
+    }, {passive: true});
+    seekBar.addEventListener('touchend', () => {
+      if (dragging) {
+        const finalVal = Number(seekBar.value);
+        endDrag(finalVal);
+      }
+    });
+    // 在卡片被移除时清理事件（自动随 DOM 移除，但保险处理 window 事件）
+    const observer = new MutationObserver(() => {
+      if (!document.contains(card)) {
+        window.removeEventListener('mouseup', mouseupHandler);
+        observer.disconnect();
+      }
+    });
+    observer.observe(document.documentElement, {childList: true, subtree: true});
     container.appendChild(card);
   }
 }
@@ -187,15 +255,23 @@ async function refreshMediaList(full = false) {
     lastMediaList = mediaList;
   } else {
     const container = document.getElementById('media-list');
-    const cards = container.querySelectorAll('.media-card');
-    mediaList.forEach(({info}, i) => {
-      const card = cards[i];
+    const cards = Array.from(container.querySelectorAll('.media-card'));
+    mediaList.forEach(({tab, info}) => {
+      const card = cards.find(c => c.dataset.tabId === String(tab.id));
       if (!card) return;
-      card.querySelector('.media-time').textContent = info.currentTime;
-      card.querySelector('.media-duration').textContent = info.duration;
-      card.querySelector('.seek-bar').value = info.rawCurrentTime;
-      card.querySelector('.media-play').textContent = info.paused ? '▶' : '⏸';
-      card.querySelector('.media-state').textContent = info.paused ? '⏸ 暂停' : '▶ 播放';
+      const locked = seekLocks.has(String(tab.id));
+      // 若该卡片在拖动锁中，跳过时间与进度条更新，避免冲突
+      if (!locked) {
+        card.querySelector('.media-time').textContent = info.currentTime;
+        card.querySelector('.media-duration').textContent = info.duration;
+        const seekBar = card.querySelector('.seek-bar');
+        if (seekBar) seekBar.value = info.rawCurrentTime;
+      }
+      // 播放状态仍可更新（不影响拖动体验）
+      const playBtn = card.querySelector('.media-play');
+      if (playBtn) playBtn.textContent = info.paused ? '▶' : '⏸';
+      const stateEl = card.querySelector('.media-state');
+      if (stateEl) stateEl.textContent = info.paused ? '⏸ 暂停' : '▶ 播放';
       // 倍速显示
       const speedSelect = card.querySelector('.media-speed');
       if (speedSelect) {
@@ -204,7 +280,7 @@ async function refreshMediaList(full = false) {
         } else {
           speedSelect.value = 'custom';
           const speedCustom = card.querySelector('.media-speed-custom');
-          if (speedCustom) speedCustom.value = info.playbackRate;
+            if (speedCustom) speedCustom.value = info.playbackRate;
         }
       }
     });

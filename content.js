@@ -7,14 +7,35 @@
   function getActiveMedia() {
     const isVisible = (el) => {
       const rect = el.getBoundingClientRect();
-      return rect.width > 30 && rect.height > 30 && !!(el.offsetParent || rect.top >= 0);
+      return rect.width > 60 && rect.height > 60 && !!(el.offsetParent || rect.top >= 0);
     };
-    const videos = Array.from(document.querySelectorAll('video')).filter(isVisible);
+    // 过滤掉典型预览视频和无效视频
+    const isValidMedia = (el) => {
+      if (!(el instanceof HTMLVideoElement || el instanceof HTMLAudioElement)) return false;
+      // src 为空或 blob:about:blank
+      // if (!el.src || el.src === 'about:blank' || el.src.startsWith('blob:')) return false;
+      // readyState < 2 表示未加载
+      if (el.readyState < 2) return false;
+      // 已播放结束
+      if (el.ended) return false;
+      // 页面非活跃时不显示（可选）
+      // if (document.visibilityState && document.visibilityState !== 'visible') return false;
+      // 典型预览视频
+      if (el instanceof HTMLVideoElement) {
+        const ct = el.currentTime || 0;
+        const isMuted = el.muted || el.volume === 0;
+        const isPaused = el.paused;
+        const small = el.videoWidth < 120 || el.videoHeight < 90 || el.clientWidth < 120 || el.clientHeight < 90;
+        if (isMuted && isPaused && ct < 1.5 && small) return false;
+      }
+      return true;
+    };
+    let videos = Array.from(document.querySelectorAll('video')).filter(isVisible).filter(isValidMedia);
     if (videos.length) {
       videos.sort((a,b) => (b.clientWidth*b.clientHeight) - (a.clientWidth*a.clientHeight));
       return videos[0];
     }
-    const audios = Array.from(document.querySelectorAll('audio'));
+    const audios = Array.from(document.querySelectorAll('audio')).filter(isVisible).filter(isValidMedia);
     return audios[0] || null;
   }
   function ensureHud() {
@@ -146,6 +167,16 @@
       return;
     }
     if (msg?.type === 'gmcx-get-media-info') {
+      // 黑名单页面过滤（严格匹配）
+      const blacklist = [
+        // 规避主页打开视频，主页不关闭，显示两个视频卡片的问题
+        'https://www.bilibili.com/',
+        // 可继续添加其他页面
+      ];
+      if (blacklist.includes(window.location.href)) {
+        sendResponse({ ok: false });
+        return;
+      }
       // 仅顶层页面返回媒体信息，避免 iframe 重复
       if (window.top !== window.self) {
         sendResponse({ ok: false });
@@ -153,6 +184,17 @@
       }
       const media = getActiveMedia();
       if (!media) {
+        sendResponse({ ok: false });
+        return;
+      }
+      // 再次过滤典型预览视频，防止误报
+      if (
+        media instanceof HTMLVideoElement &&
+        (media.muted || media.volume === 0) &&
+        media.paused &&
+        (media.currentTime || 0) < 1.5 &&
+        (media.videoWidth < 120 || media.videoHeight < 90 || media.clientWidth < 120 || media.clientHeight < 90)
+      ) {
         sendResponse({ ok: false });
         return;
       }

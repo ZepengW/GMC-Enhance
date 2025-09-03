@@ -16,7 +16,8 @@
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "GMC-Enhance"
+    "default_title": "GMC-Enhance",
+    "default_popup": "popup.html"
   },
   "options_page": "options.html",
   "icons": {

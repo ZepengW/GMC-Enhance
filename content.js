@@ -132,16 +132,47 @@
       }
     }
   }, true);
-  chrome.runtime.onMessage.addListener((msg) => {
-    if (msg?.type !== 'gmcx-command') return;
-    switch (msg.command) {
-      case 'toggle-play-pause': togglePlay(); break;
-      case 'seek-forward': seekBy(STATE.seekStep); break;
-      case 'seek-back': seekBy(-STATE.seekStep); break;
-      case 'speed-up': adjustRate(STATE.speedStep); break;
-      case 'speed-down': adjustRate(-STATE.speedStep); break;
-      case 'speed-reset': setRate(1.0); break;
-      case 'screenshot': screenshotVideo(); break;
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg?.type === 'gmcx-command') {
+      switch (msg.command) {
+        case 'toggle-play-pause': togglePlay(); break;
+        case 'seek-forward': seekBy(STATE.seekStep); break;
+        case 'seek-back': seekBy(-STATE.seekStep); break;
+        case 'speed-up': adjustRate(STATE.speedStep); break;
+        case 'speed-down': adjustRate(-STATE.speedStep); break;
+        case 'speed-reset': setRate(1.0); break;
+        case 'screenshot': screenshotVideo(); break;
+      }
+      return;
+    }
+    if (msg?.type === 'gmcx-get-media-info') {
+      const media = getActiveMedia();
+      if (!media) {
+        sendResponse({ ok: false });
+        return;
+      }
+      const type = media instanceof HTMLVideoElement ? 'video' : 'audio';
+      const paused = !!media.paused;
+      const currentTime = formatTime(media.currentTime);
+      const duration = formatTime(media.duration);
+      sendResponse({
+        ok: true,
+        type,
+        paused,
+        currentTime,
+        duration,
+        rawCurrentTime: media.currentTime,
+        rawDuration: media.duration
+      });
+      return;
+    }
+    if (msg?.type === 'gmcx-set-media-currentTime') {
+      const media = getActiveMedia();
+      if (media && isFinite(media.duration)) {
+        media.currentTime = Math.max(0, Math.min(media.duration, Number(msg.value)));
+      }
+      sendResponse({ ok: true });
+      return;
     }
   });
 })();

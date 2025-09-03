@@ -102,14 +102,29 @@ function renderMediaList(mediaList) {
     // 倍速选择
     const speedSelect = card.querySelector('.media-speed');
     const speedCustom = card.querySelector('.media-speed-custom');
-    speedSelect.value = info.playbackRate && [0.5,0.75,1,1.25,1.5,2].includes(info.playbackRate) ? String(info.playbackRate) : '1';
+    // 判断是否为自定义倍速
+    if ([0.5,0.75,1,1.25,1.5,2].includes(info.playbackRate)) {
+      speedSelect.value = String(info.playbackRate);
+      speedSelect.style.display = '';
+      speedCustom.style.display = 'none';
+    } else {
+      // 隐藏下拉栏，仅显示自定义倍速输入框（只读）
+      speedSelect.style.display = 'none';
+      speedCustom.style.display = '';
+      speedCustom.value = info.playbackRate?.toFixed(2) || '';
+      speedCustom.readOnly = true;
+    }
     speedSelect.addEventListener('change', async (e) => {
       if (e.target.value === 'custom') {
+        // 隐藏下拉栏，显示自定义输入框（可编辑）
+        speedSelect.style.display = 'none';
         speedCustom.style.display = '';
         speedCustom.value = info.playbackRate || '';
+        speedCustom.readOnly = false;
         speedCustom.focus();
       } else {
         speedCustom.style.display = 'none';
+        speedSelect.style.display = '';
         await sendToTab(tab.id, {type: 'gmcx-set-media-speed', value: Number(e.target.value)});
         refreshMediaList();
       }
@@ -118,6 +133,11 @@ function renderMediaList(mediaList) {
       const val = Number(e.target.value);
       if (val >= 0.1 && val <= 10) {
         await sendToTab(tab.id, {type: 'gmcx-set-media-speed', value: val});
+        // 设置完毕后，仅显示自定义倍速输入框（只读）
+        speedCustom.style.display = '';
+        speedCustom.value = val.toFixed(2);
+        speedCustom.readOnly = true;
+        speedSelect.style.display = 'none';
         refreshMediaList();
       }
     });
@@ -125,6 +145,12 @@ function renderMediaList(mediaList) {
     card.querySelector('.media-reset').addEventListener('click', async () => {
       // 只重置倍速为1倍速
       await sendToTab(tab.id, {type: 'gmcx-set-media-speed', value: 1.0});
+      // 下拉栏恢复显示，自定义输入框消失
+      speedCustom.style.display = 'none';
+      speedSelect.style.display = '';
+      speedSelect.value = '1';
+      let customOption = speedSelect.querySelector('option[value="custom"]');
+      if (customOption) customOption.textContent = '自定义';
       refreshMediaList();
     });
     // 进度条

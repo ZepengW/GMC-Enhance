@@ -335,14 +335,14 @@
         case 'KeyK':       togglePlay(); e.preventDefault(); break;
         case 'KeyL':       seekBy(STATE.seekStep); e.preventDefault(); break;
         case 'KeyJ':       seekBy(-STATE.seekStep); e.preventDefault(); break;
-        case 'KeyI':       adjustRate(STATE.speedStep); e.preventDefault(); break;
-        case 'KeyU':       adjustRate(-STATE.speedStep); e.preventDefault(); break;
-        case 'KeyO': { // 改为循环倍速
-          const m = getActiveMedia();
-          cycleSpeed(m);
-          e.preventDefault();
-          break;
-        }
+        case 'KeyU': { // 全局加速
+          chrome.runtime.sendMessage({type:'gmcx-global-speed', action:'up'}); e.preventDefault(); break; }
+        case 'KeyO': { // 全局减速
+          chrome.runtime.sendMessage({type:'gmcx-global-speed', action:'down'}); e.preventDefault(); break; }
+        case 'KeyI': { // 重置 1x
+          chrome.runtime.sendMessage({type:'gmcx-global-speed', action:'reset'}); e.preventDefault(); break; }
+        case 'KeyP': { // 循环预设
+          chrome.runtime.sendMessage({type:'gmcx-global-speed', action:'cycle'}); e.preventDefault(); break; }
         case 'KeyS':       screenshotVideo(); e.preventDefault(); break;
         case 'KeyM': { // 备用：与 cycle-video 命令一致
           cycleSelectedMedia();
@@ -394,7 +394,11 @@
         const el = ensureFineOverlay(); // 复用 fine overlay 容器结构以减少样式重复
         el.wrap.style.opacity = '1';
         // 标题 & 模式
-        el.center.textContent = p.title ? (p.title.slice(0,60)) : '全局控制';
+        let centerTxt = p.title ? (p.title.slice(0,60)) : '全局控制';
+        if (typeof p.playbackRate === 'number') {
+          centerTxt += `  |  ${p.playbackRate.toFixed(2)}x`;
+        }
+        el.center.textContent = centerTxt;
         // 时间显示逻辑：如果是预览（seek 预估），currentTime 显示预估秒；否则显示真实
         const leftLabel = p.preview && typeof p.previewSeconds === 'number' ? formatTime(p.previewSeconds) : (p.currentTime || '--:--');
         el.left.textContent = leftLabel;

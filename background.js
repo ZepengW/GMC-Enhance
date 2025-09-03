@@ -10,7 +10,10 @@ const GLOBAL_MEDIA = {
   seekAccumTimer: null,
   seekDebounce: 550,
   baseTime: null, // 最近一次实际 currentTime 基准
-  pendingRefreshAfterSwitch: false
+  pendingRefreshAfterSwitch: false,
+  speedStep: 0.25,
+  speedPresets: [0.75, 1, 1.25, 1.5, 2],
+  speedPresetIndex: 1
 };
 
 function sendToContent(tabId, msg) {
@@ -100,7 +103,8 @@ async function ensureBaseTime() {
       duration: updated.duration,
       currentTime: updated.currentTime,
       percent: updated.rawDuration ? (updated.rawCurrentTime / updated.rawDuration) * 100 : 0,
-      preview: false
+      preview: false,
+      playbackRate: updated.playbackRate
     });
   }
 }
@@ -125,7 +129,8 @@ function scheduleSeekCommit() {
           duration: updated.duration,
           currentTime: updated.currentTime,
           percent: updated.rawDuration ? (updated.rawCurrentTime / updated.rawDuration) * 100 : 0,
-          preview: false
+          preview: false,
+          playbackRate: updated.playbackRate
         });
       }
     } finally {
@@ -179,11 +184,66 @@ async function togglePlayGlobal() {
         duration: after.duration,
         currentTime: after.currentTime,
         percent: after.rawDuration ? (after.rawCurrentTime / after.rawDuration) * 100 : 0,
-        preview: false
+        preview: false,
+        playbackRate: after.playbackRate
       });
     }
   }
 }
+
+async function applyPlaybackRate(rate) {
+  if (GLOBAL_MEDIA.selectedIndex < 0) return;
+  const entry = GLOBAL_MEDIA.mediaList[GLOBAL_MEDIA.selectedIndex];
+  if (!entry) return;
+  await sendToTab(entry.tab.id, {type:'gmcx-set-media-speed', value: rate});
+  const after = await sendToTab(entry.tab.id, {type:'gmcx-get-media-info'});
+  if (after && after.ok) {
+    overlayUpdateOnActive({
+      mode:'speed-set',
+      index: GLOBAL_MEDIA.selectedIndex + 1,
+      total: GLOBAL_MEDIA.mediaList.length,
+      title: (entry.tab.title || entry.tab.url || '').slice(0,80),
+      paused: after.paused,
+      duration: after.duration,
+      currentTime: after.currentTime,
+      percent: after.rawDuration ? (after.rawCurrentTime / after.rawDuration) * 100 : 0,
+      preview: false,
+      playbackRate: after.playbackRate
+    });
+  }
+}
+
+async function adjustPlaybackRate(delta) {
+  if (GLOBAL_MEDIA.selectedIndex < 0) return;
+  const entry = GLOBAL_MEDIA.mediaList[GLOBAL_MEDIA.selectedIndex];
+  if (!entry) return;
+  const info = await sendToTab(entry.tab.id, {type:'gmcx-get-media-info'});
+  if (!info || !info.ok) return;
+  let next = (info.playbackRate || 1) + delta;
+  next = Math.min(16, Math.max(0.06, Number(next.toFixed(2))));
+  await applyPlaybackRate(next);
+}
+
+async function cyclePlaybackPreset() {
+  if (GLOBAL_MEDIA.selectedIndex < 0) return;
+  GLOBAL_MEDIA.speedPresetIndex = (GLOBAL_MEDIA.speedPresetIndex + 1) % GLOBAL_MEDIA.speedPresets.length;
+  const target = GLOBAL_MEDIA.speedPresets[GLOBAL_MEDIA.speedPresetIndex];
+  await applyPlaybackRate(target);
+}
+
+function loadSpeedSettings() {
+  chrome.storage.sync.get({ speedStep: 0.25 }, (cfg) => {
+    const step = Number(cfg.speedStep);
+    if (step && step > 0) GLOBAL_MEDIA.speedStep = step;
+  });
+}
+loadSpeedSettings();
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'sync' && changes.speedStep) {
+    const nv = Number(changes.speedStep.newValue);
+    if (nv && nv > 0) GLOBAL_MEDIA.speedStep = nv;
+  }
+});
 async function getActiveTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   return tab;
@@ -225,6 +285,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ ok: true, dataUrl });
       }
     });
+    return true;
+  }
+  if (msg?.type === 'gmcx-global-speed') {
+    (async () => {
+      await scanMediaAcrossTabs();
+      if (GLOBAL_MEDIA.selectedIndex < 0) { sendResponse({ok:false}); return; }
+      if (msg.action === 'up') { await adjustPlaybackRate(+GLOBAL_MEDIA.speedStep); sendResponse({ok:true}); return; }
+      if (msg.action === 'down') { await adjustPlaybackRate(-GLOBAL_MEDIA.speedStep); sendResponse({ok:true}); return; }
+      if (msg.action === 'reset') { await applyPlaybackRate(1); sendResponse({ok:true}); return; }
+      if (msg.action === 'cycle') { await cyclePlaybackPreset(); sendResponse({ok:true}); return; }
+      sendResponse({ok:false});
+    })();
     return true;
   }
 });

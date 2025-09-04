@@ -65,6 +65,8 @@ GMC-Enhance supports the following keyboard shortcuts for efficient media contro
 | Volume Down             | `Alt + Shift + <`   | Decrease volume (default: -5%).                                                                                 |
 | Mute/Unmute             | `Alt + Shift + M`   | Toggle mute/unmute.                                                                                              |
 
+![Floating Video Control](docs\imgs\video_float_card.gif)
+
 **Tip**: By mapping shortcuts to a keyboard knob, you can achieve precise control over video progress, which was the inspiration behind this extension.
 
 ---

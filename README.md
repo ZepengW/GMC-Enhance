@@ -27,6 +27,7 @@ GMC-Enhance offers a range of features to improve your media playback experience
 - [x] **Global Shortcuts**: Use customizable keyboard shortcuts for seamless media control.
 - [x] **Volume Control**: Adjust volume levels for individual videos, including mute/unmute options.
 - [x] **Audio Effects**: Enhance audio quality by adjusting specific frequency bands (e.g., reduce vocals or boost bass).
+- [x] **Floating Window**: Displays a floating window when adjusting via shortcuts, making it easy to view the current status.
 
 ---
 

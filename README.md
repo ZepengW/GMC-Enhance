@@ -1,6 +1,8 @@
 # GMC-Enhance
 
-Global Media Control (GMC)-Enhanced is a chrome extension designed to enhance the functionality of the Global Media Control feature in chrome. It provides a unified interface and additional features for managing media playback across multiple tabs and windows, making media control more intuitive and efficient.
+Unified Control · Powerful Shortcuts · Independent Tab Sessions
+
+Global Media Control (GMC)-Enhance is a Chrome extension that supercharges Chrome's built‑in Global Media Control. It delivers true **unified control** across all your media, **global shortcuts** for instant actions, and **independent tab sessions** so each tab keeps its own playback, speed, and effect state without interference.
 
 ![Logo](docs\imgs\banner.png)
 
@@ -24,7 +26,8 @@ GMC-Enhance offers a range of features to improve your media playback experience
 
 - [x] **Unified Media Control**: Manage all media sessions from a single toolbar interface without switching tabs.
 - [x] **Playback Control**: Play, pause, skip backward/forward, and adjust playback speed.
-- [x] **Global Shortcuts**: Use customizable keyboard shortcuts for seamless media control.
+- [x] **Global Shortcuts**: Customizable keyboard shortcuts for instant control (seek, speed, volume, mute, select active video).
+- [x] **Independent Tab Sessions**: Each tab maintains its own playback speed, selected target video, volume, and audio effect state—no accidental cross‑tab interference.
 - [x] **Volume Control**: Adjust volume levels for individual videos, including mute/unmute options.
 - [x] **Audio Effects**: Enhance audio quality by adjusting specific frequency bands (e.g., reduce vocals or boost bass).
 - [x] **Floating Window**: Displays a floating window when adjusting via shortcuts, making it easy to view the current status.
@@ -47,9 +50,9 @@ Enhance your listening experience with advanced audio controls. For example:
 
 These adjustments are particularly useful for live streams or videos with unbalanced audio.
 
-### 3. Shortcuts
+### 3. Shortcuts (Global & Customizable)
 
-GMC-Enhance supports the following keyboard shortcuts for efficient media control:
+GMC-Enhance supports the following keyboard shortcuts for fast, interruption‑free media control. You can remap them in Chrome's extension shortcut settings.
 
 | Action                  | Shortcut            | Description                                                                                                      |
 |-------------------------|---------------------|------------------------------------------------------------------------------------------------------------------|

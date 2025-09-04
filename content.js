@@ -259,14 +259,24 @@
     el.barFill.style.background = 'linear-gradient(90deg,#4facfe,#00f2fe)';
     el.left.textContent = formatTime(cur);
     el.right.textContent = isFinite(media.duration) ? formatTime(media.duration) : '--:--';
-    // 中间显示：播放状态 + 速率 或 额外提示
+    // 中间显示：播放状态 + 速率 + 音量/静音 或 额外提示
     let center = '';
-    if (media.paused) center += '⏸ ';
-    else center += '▶ ';
-    center += (extra.actionLabel ? (extra.actionLabel + ' · ') : '');
-    center += (media.playbackRate ? media.playbackRate.toFixed(2) + 'x' : '1.00x');
+    center += media.paused ? '⏸ ' : '▶ ';
+    if (extra.actionLabel) {
+      center += extra.actionLabel + ' · ';
+    }
+    const rateTxt = (media.playbackRate ? media.playbackRate.toFixed(2) : '1.00') + 'x';
+    let volTxt = '';
+    if (media.muted || media.volume === 0) {
+      volTxt = '🔇';
+    } else {
+      const v = Math.round(media.volume * 100);
+      if (v > 66) volTxt = '🔊'+v+'%';
+      else if (v > 33) volTxt = '🔉'+v+'%';
+      else volTxt = '🔈'+v+'%';
+    }
+    center += rateTxt + ' · ' + volTxt;
     el.center.textContent = center;
-    // 侧向轮播（本地仅当前，不显示左右）
     if (el.prev) el.prev.textContent = '';
     if (el.next) el.next.textContent = '';
     resetOverlayAutoHide();
@@ -464,6 +474,10 @@
         case 'KeyK':       togglePlay(); e.preventDefault(); break;
         case 'KeyL':       seekBy(STATE.seekStep); e.preventDefault(); break;
         case 'KeyJ':       seekBy(-STATE.seekStep); e.preventDefault(); break;
+        case 'Comma': { // Alt+Shift+< 音量降低
+          chrome.runtime.sendMessage({type:'gmcx-global-volume', action:'down'}); e.preventDefault(); break; }
+        case 'Period': { // Alt+Shift+> 音量增加
+          chrome.runtime.sendMessage({type:'gmcx-global-volume', action:'up'}); e.preventDefault(); break; }
         case 'KeyM': { // 静音/取消静音
           try {
             chrome.runtime.sendMessage({ type: 'gmcx-toggle-mute' }, (resp) => {
@@ -545,9 +559,24 @@
         const el = ensureFineOverlay(); // 复用 fine overlay 容器结构以减少样式重复
         el.wrap.style.opacity = '1';
         // 标题 & 模式
-        let centerTxt = p.title ? (p.title.slice(0,60)) : '全局控制';
+        let centerTxt = '';
+        // 播放状态图标
+        if (typeof p.paused === 'boolean') {
+          centerTxt += p.paused ? '⏸ ' : '▶ ';
+        }
+        centerTxt += p.title ? (p.title.slice(0,60)) : '全局控制';
+        // 速率
         if (typeof p.playbackRate === 'number') {
-          centerTxt += `  |  ${p.playbackRate.toFixed(2)}x`;
+          centerTxt += ` | ${p.playbackRate.toFixed(2)}x`;
+        }
+        // 音量（若提供）
+        if (typeof p.volume === 'number') {
+          const volPercent = Math.round(p.volume * 100);
+          let volIcon = '🔊';
+          if (p.muted || p.volume === 0) volIcon = '🔇';
+          else if (p.volume < 0.33) volIcon = '🔈';
+          else if (p.volume < 0.66) volIcon = '🔉';
+          centerTxt += ` | ${volIcon} ${volPercent}%`;
         }
         el.center.textContent = centerTxt;
         // 时间显示逻辑：如果是预览（seek 预估），currentTime 显示预估秒；否则显示真实
@@ -577,6 +606,34 @@
         resetOverlayAutoHide();
         return true;
       }
+      // Enhance render: mutate existing fine overlay when global payload arrives
+      const p = msg.payload;
+      if (p) {
+        const el = ensureFineOverlay();
+        el.wrap.style.opacity = '1';
+        if (typeof p.percent === 'number') {
+          el.barFill.style.width = p.percent.toFixed(3) + '%';
+        }
+        el.left.textContent = p.currentTime || '--:--';
+        el.right.textContent = p.duration || '--:--';
+        // Center composition: index/total + play state + speed + volume/mute
+        let center = '';
+        if (p.index && p.total) center += `[${p.index}/${p.total}] `;
+        center += (p.paused ? '⏸' : '▶');
+        if (typeof p.playbackRate === 'number') center += ' ' + p.playbackRate.toFixed(2) + 'x';
+        if (p.muted) center += ' · 🔇';
+        else if (typeof p.volume === 'number') {
+          const v = Math.round(p.volume * 100);
+            if (v > 66) center += ' · 🔊'+v+'%';
+            else if (v > 33) center += ' · 🔉'+v+'%';
+            else center += ' · 🔈'+v+'%';
+        }
+        el.center.textContent = center;
+        // For global we might show surrounding titles soon; placeholder keep empty
+        el.prev.textContent = '';
+        el.next.textContent = p.title ? p.title : '';
+        resetOverlayAutoHide();
+      }
     }
     if (msg?.type === 'gmcx-play-media') {
       const media = getActiveMedia();
@@ -594,13 +651,13 @@
     }
     if (msg?.type === 'gmcx-mute-media') {
       const media = getActiveMedia();
-      if (media) { media.muted = true; showOverlayForMedia(media, '静音'); }
+      if (media) { media.muted = true; if (!msg.silent) showOverlayForMedia(media, '静音'); }
       sendResponse({ok:true});
       return;
     }
     if (msg?.type === 'gmcx-unmute-media') {
       const media = getActiveMedia();
-      if (media) { media.muted = false; showOverlayForMedia(media, '取消静音'); }
+      if (media) { media.muted = false; if (!msg.silent) showOverlayForMedia(media, '取消静音'); }
       sendResponse({ok:true});
       return;
     }
@@ -610,7 +667,7 @@
         const vol = Math.min(1, Math.max(0, Number(msg.value)));
         media.volume = vol;
         if (vol > 0 && media.muted) media.muted = false;
-        showOverlayForMedia(media, `音量 ${(vol*100).toFixed(0)}%`);
+        if (!msg.silent) showOverlayForMedia(media, `音量 ${(vol*100).toFixed(0)}%`);
       }
       sendResponse({ok:true});
       return;

@@ -28,7 +28,8 @@ const GLOBAL_MEDIA = {
   speedStep: 0.25,
   speedPresets: [0.75, 1, 1.25, 1.5, 2],
   speedPresetIndex: 1,
-  forceGlobal: false // 在用户使用 cycle-video 后强制使用全局控制；未 force 时默认聚焦当前活动标签媒体
+  forceGlobal: false, // 在用户使用 cycle-video 后强制使用全局控制；未 force 时默认聚焦当前活动标签媒体
+  volumeStep: 0.05
 };
 
 /**
@@ -122,6 +123,7 @@ async function cycleGlobalSelection() {
         percent: fresh.rawDuration ? (fresh.rawCurrentTime / fresh.rawDuration) * 100 : 0,
         preview: false,
         playbackRate: fresh.playbackRate
+        // 这里暂未包含 volume/muted，后续同步点会补充
       });
       GLOBAL_MEDIA.baseTime = fresh.rawCurrentTime; // 直接设置基准
     } else {
@@ -197,7 +199,9 @@ function scheduleSeekCommit() {
           currentTime: updated.currentTime,
           percent: updated.rawDuration ? (updated.rawCurrentTime / updated.rawDuration) * 100 : 0,
           preview: false,
-          playbackRate: updated.playbackRate
+          playbackRate: updated.playbackRate,
+          volume: updated.volume,
+          muted: updated.muted
         });
       }
     } finally {
@@ -252,7 +256,9 @@ async function togglePlayGlobal() {
         currentTime: after.currentTime,
         percent: after.rawDuration ? (after.rawCurrentTime / after.rawDuration) * 100 : 0,
         preview: false,
-        playbackRate: after.playbackRate
+        playbackRate: after.playbackRate,
+        volume: after.volume,
+        muted: after.muted
       });
     }
   }
@@ -265,9 +271,9 @@ async function toggleMuteGlobal() {
   const state = await sendToTab(entry.tab.id, {type:'gmcx-get-media-info'});
   if (!state || !state.ok) return;
   if (state.muted) {
-    await sendToTab(entry.tab.id, {type:'gmcx-unmute-media'});
+    await sendToTab(entry.tab.id, {type:'gmcx-unmute-media', silent:true});
   } else {
-    await sendToTab(entry.tab.id, {type:'gmcx-mute-media'});
+    await sendToTab(entry.tab.id, {type:'gmcx-mute-media', silent:true});
   }
   const after = await sendToTab(entry.tab.id, {type:'gmcx-get-media-info'});
   if (after && after.ok) {
@@ -281,7 +287,9 @@ async function toggleMuteGlobal() {
       currentTime: after.currentTime,
       percent: after.rawDuration ? (after.rawCurrentTime / after.rawDuration) * 100 : 0,
       preview: false,
-      playbackRate: after.playbackRate
+      playbackRate: after.playbackRate,
+      volume: after.volume,
+      muted: after.muted
     });
   }
 }
@@ -303,9 +311,47 @@ async function applyPlaybackRate(rate) {
       currentTime: after.currentTime,
       percent: after.rawDuration ? (after.rawCurrentTime / after.rawDuration) * 100 : 0,
       preview: false,
-      playbackRate: after.playbackRate
+      playbackRate: after.playbackRate,
+      volume: after.volume,
+      muted: after.muted
     });
   }
+}
+
+// ===== 新增：音量控制 =====
+async function applyVolume(vol) {
+  if (GLOBAL_MEDIA.selectedIndex < 0) return;
+  vol = Math.min(1, Math.max(0, Number(vol)));
+  const entry = GLOBAL_MEDIA.mediaList[GLOBAL_MEDIA.selectedIndex];
+  if (!entry) return;
+  await sendToTab(entry.tab.id, {type:'gmcx-set-media-volume', value: vol, silent:true});
+  const after = await sendToTab(entry.tab.id, {type:'gmcx-get-media-info'});
+  if (after && after.ok) {
+    overlayUpdateOnActive({
+      mode:'volume-set',
+      index: GLOBAL_MEDIA.selectedIndex + 1,
+      total: GLOBAL_MEDIA.mediaList.length,
+      title: (entry.tab.title || entry.tab.url || '').slice(0,80),
+      paused: after.paused,
+      duration: after.duration,
+      currentTime: after.currentTime,
+      percent: after.rawDuration ? (after.rawCurrentTime / after.rawDuration) * 100 : 0,
+      preview: false,
+      playbackRate: after.playbackRate,
+      volume: after.volume,
+      muted: after.muted
+    });
+  }
+}
+async function adjustVolume(delta) {
+  if (GLOBAL_MEDIA.selectedIndex < 0) return;
+  const entry = GLOBAL_MEDIA.mediaList[GLOBAL_MEDIA.selectedIndex];
+  if (!entry) return;
+  const info = await sendToTab(entry.tab.id, {type:'gmcx-get-media-info'});
+  if (!info || !info.ok) return;
+  let next = (info.volume != null ? info.volume : 1) + delta;
+  next = Math.min(1, Math.max(0, Number(next.toFixed(3))));
+  await applyVolume(next);
 }
 
 async function adjustPlaybackRate(delta) {
@@ -327,9 +373,11 @@ async function cyclePlaybackPreset() {
 }
 
 function loadSpeedSettings() {
-  chrome.storage.sync.get({ speedStep: 0.25 }, (cfg) => {
+  chrome.storage.sync.get({ speedStep: 0.25, volumeStep: 0.05 }, (cfg) => {
     const step = Number(cfg.speedStep);
     if (step && step > 0) GLOBAL_MEDIA.speedStep = step;
+    const vstep = Number(cfg.volumeStep);
+    if (vstep && vstep > 0 && vstep <= 0.5) GLOBAL_MEDIA.volumeStep = vstep;
   });
 }
 loadSpeedSettings();
@@ -337,6 +385,10 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'sync' && changes.speedStep) {
     const nv = Number(changes.speedStep.newValue);
     if (nv && nv > 0) GLOBAL_MEDIA.speedStep = nv;
+  }
+  if (area === 'sync' && changes.volumeStep) {
+    const nv = Number(changes.volumeStep.newValue);
+    if (nv && nv > 0 && nv <= 0.5) GLOBAL_MEDIA.volumeStep = nv;
   }
 });
 async function getActiveTab() {
@@ -402,5 +454,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       sendResponse({ok:true, scope: GLOBAL_MEDIA.forceGlobal ? 'global' : 'active-auto'});
     })();
     return true; // async
+  }
+  if (msg?.type === 'gmcx-global-volume') {
+    (async () => {
+      const activeTab = await getActiveTab();
+      await scanMediaAcrossTabs();
+      await ensureActiveSelection(activeTab?.id);
+      if (GLOBAL_MEDIA.selectedIndex < 0) { sendResponse({ok:false}); return; }
+      if (msg.action === 'up') { await adjustVolume(+GLOBAL_MEDIA.volumeStep); sendResponse({ok:true}); return; }
+      if (msg.action === 'down') { await adjustVolume(-GLOBAL_MEDIA.volumeStep); sendResponse({ok:true}); return; }
+      sendResponse({ok:false});
+    })();
+    return true;
   }
 });

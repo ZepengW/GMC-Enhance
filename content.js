@@ -549,50 +549,45 @@
         const p = msg.payload || {};
         const el = ensureFineOverlay();
         el.wrap.style.opacity = '1';
-        // Prepare grid container: two columns (title max 50%, status auto)
+        // 重构布局：标题单独一行靠左显示，状态信息单独一行
         while (el.center.firstChild) el.center.removeChild(el.center.firstChild);
-        el.center.style.display = 'grid';
-        el.center.style.gridTemplateColumns = 'minmax(0,50%) auto';
-        el.center.style.alignItems = 'center';
-        el.center.style.columnGap = '18px';
-        el.center.style.justifyContent = 'center';
+        el.center.style.display = 'flex';
+        el.center.style.flexDirection = 'column';
+        el.center.style.alignItems = 'stretch';
+        el.center.style.justifyContent = 'flex-start';
         el.center.style.width = '100%';
-        // Title column content
-        const titleCol = document.createElement('div');
-        titleCol.style.cssText = 'min-width:0;display:flex;align-items:center;gap:6px;overflow:hidden;';
+        // Title line
+        const titleLine = document.createElement('div');
+        titleLine.style.cssText = 'display:flex;align-items:center;gap:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600;font-size:12px;text-align:left;';
         if (typeof p.paused === 'boolean') {
           const icon = document.createElement('span');
           icon.textContent = p.paused ? '▶️' : '⏸️';
           icon.style.flex = 'none';
-          titleCol.appendChild(icon);
+          titleLine.appendChild(icon);
         }
         const titleSpan = document.createElement('span');
-        // 插入 [i/n] 标识：优先使用后台跨标签传来的全局 index/total（p.index 已是 1-based）
         let indexPrefix = '';
         if (typeof p.index === 'number' && typeof p.total === 'number' && p.total > 0) {
           indexPrefix = `[${p.index}/${p.total}] `;
         } else {
-          // 回退：仅在未提供全局数据时使用当前页面的缓存选择
           try {
             const current = resolveSelectedMedia();
             const total = STATE.videosCache.length;
-            if (current && total) {
-              indexPrefix = `[${Math.min(STATE.selectedIndex + 1, total)}/${total}] `;
-            }
+            if (current && total) indexPrefix = `[${Math.min(STATE.selectedIndex + 1, total)}/${total}] `;
           } catch {}
         }
         const baseTitle = p.title || '全局控制';
         const fullTitle = indexPrefix + baseTitle;
         titleSpan.textContent = fullTitle;
         titleSpan.title = fullTitle;
-        titleSpan.style.cssText = 'flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
-        titleCol.appendChild(titleSpan);
-        // Status column content
-        const statusCol = document.createElement('div');
-        statusCol.style.cssText = 'display:flex;align-items:center;gap:12px;font-variant-numeric:tabular-nums;';
+        titleSpan.style.cssText = 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;';
+        titleLine.appendChild(titleSpan);
+        el.center.appendChild(titleLine);
+        // Status line
+        const statusLine = document.createElement('div');
+        statusLine.style.cssText = 'margin-top:4px;display:flex;align-items:center;gap:14px;font-variant-numeric:tabular-nums;font-size:11px;opacity:.9;';
         const rateSpan = document.createElement('span');
-        if (typeof p.playbackRate === 'number') rateSpan.textContent = p.playbackRate.toFixed(2) + 'x'; else rateSpan.textContent = '1.00x';
-        statusCol.appendChild(rateSpan);
+        rateSpan.textContent = (typeof p.playbackRate === 'number' ? p.playbackRate.toFixed(2) : '1.00') + 'x';
         const volSpan = document.createElement('span');
         if (typeof p.volume === 'number') {
           let volIcon = '🔊';
@@ -605,9 +600,9 @@
         } else {
           volSpan.textContent = '—';
         }
-        statusCol.appendChild(volSpan);
-        el.center.appendChild(titleCol);
-        el.center.appendChild(statusCol);
+        statusLine.appendChild(rateSpan);
+        statusLine.appendChild(volSpan);
+        el.center.appendChild(statusLine);
         // Time & progress bar
         const leftLabel = p.preview && typeof p.previewSeconds === 'number' ? formatTime(p.previewSeconds) : (p.currentTime || '--:--');
         el.left.textContent = leftLabel;

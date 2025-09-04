@@ -517,19 +517,8 @@
       // 阻止事件继续冒泡到页面脚本，确保永远触发我们的覆盖层
       e.stopImmediatePropagation();
     }
-    // 无修饰键时的线性微调：按住 A / D (或 H / L) 实现连续微调
-    if (!e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
-      if (e.code === 'KeyD' || e.code === 'ArrowRight') { startFineSeek(1); }
-      else if (e.code === 'KeyA' || e.code === 'ArrowLeft') { startFineSeek(-1); }
-    }
   }, true);
 
-  window.addEventListener('keyup', (e) => {
-    if (!e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
-      if (e.code === 'KeyD' || e.code === 'ArrowRight') stopFineSeek(1);
-      else if (e.code === 'KeyA' || e.code === 'ArrowLeft') stopFineSeek(-1);
-    }
-  });
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // 新增：支持 popup.js 控制消息
     if (msg?.type === 'gmcx-command') {

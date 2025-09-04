@@ -16,7 +16,7 @@
     lastMediaWeak: null,
     fineOverlayEl: null,
     overlayHideTimer: null,
-    overlayHideDelay: 2200
+    overlayHideDelay: 10000
   };
   // ====== EQ 状态 ======
   const EQ = {
@@ -90,18 +90,31 @@
     STATE.speedStep = Number(cfg.speedStep) || 0.25;
   });
   function collectVideos() {
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+    const viewportMid = viewportHeight / 2;
     const isVisible = (el) => {
       const rect = el.getBoundingClientRect();
-      return rect.width > 60 && rect.height > 60 && !!(el.offsetParent || rect.top >= 0);
+      return rect.width > 60 && rect.height > 60 && rect.bottom > 0 && rect.top < viewportHeight;
     };
     const medias = Array.from(document.querySelectorAll('video, audio')).filter(isVisible).filter(el => {
       if (!(el instanceof HTMLMediaElement)) return false;
-      if (el.readyState < 1) return false; // 允许更早加载
+      if (el.readyState < 1) return false;
       if (el.ended) return false;
       return true;
     });
-    // 排序：大尺寸视频优先，其次音频/小视频
+    // 排序策略：
+    // 1. 正在播放的优先 (paused=false)
+    // 2. 与视口中线距离更小
+    // 3. 面积更大
     medias.sort((a,b) => {
+      const aPlaying = a.paused ? 0 : 1;
+      const bPlaying = b.paused ? 0 : 1;
+      if (bPlaying - aPlaying) return bPlaying - aPlaying;
+      const rectA = a.getBoundingClientRect();
+      const rectB = b.getBoundingClientRect();
+      const aCenterDist = Math.abs((rectA.top + rectA.height/2) - viewportMid);
+      const bCenterDist = Math.abs((rectB.top + rectB.height/2) - viewportMid);
+      if (aCenterDist !== bCenterDist) return aCenterDist - bCenterDist; // 距离越小越靠前
       const areaA = (a instanceof HTMLVideoElement) ? (a.videoWidth * a.videoHeight) : 0;
       const areaB = (b instanceof HTMLVideoElement) ? (b.videoWidth * b.videoHeight) : 0;
       return areaB - areaA;
@@ -295,6 +308,11 @@
     else { media.pause?.(); }
     updateLocalOverlay({actionLabel: media.paused ? '暂停' : '播放'});
   }
+  // 统一为后台消息调用封装一个操作后展示覆盖层的辅助
+  function showOverlayForMedia(media, label) {
+    if (!media) return;
+    updateLocalOverlay({ actionLabel: label });
+  }
   async function saveBlob(blob, filename) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = filename;
@@ -447,10 +465,22 @@
         case 'KeyL':       seekBy(STATE.seekStep); e.preventDefault(); break;
         case 'KeyJ':       seekBy(-STATE.seekStep); e.preventDefault(); break;
         case 'KeyM': { // 静音/取消静音
-          const media = getActiveMedia();
-          if (media) {
-            media.muted = !media.muted;
-            updateLocalOverlay({actionLabel: media.muted ? '静音' : '取消静音'});
+          try {
+            chrome.runtime.sendMessage({ type: 'gmcx-toggle-mute' }, (resp) => {
+              if (!resp || !resp.ok) {
+                const media = getActiveMedia();
+                if (media) {
+                  media.muted = !media.muted;
+                  updateLocalOverlay({actionLabel: media.muted ? '静音' : '取消静音'});
+                }
+              }
+            });
+          } catch {
+            const media = getActiveMedia();
+            if (media) {
+              media.muted = !media.muted;
+              updateLocalOverlay({actionLabel: media.muted ? '静音' : '取消静音'});
+            }
           }
           e.preventDefault();
           break;
@@ -469,6 +499,8 @@
           e.preventDefault();
           break; }
       }
+      // 阻止事件继续冒泡到页面脚本，确保永远触发我们的覆盖层
+      e.stopImmediatePropagation();
     }
     // 无修饰键时的线性微调：按住 A / D (或 H / L) 实现连续微调
     if (!e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
@@ -549,24 +581,26 @@
     if (msg?.type === 'gmcx-play-media') {
       const media = getActiveMedia();
       if (media && media.paused) media.play?.();
+      showOverlayForMedia(media, '播放');
       sendResponse({ ok: true });
       return;
     }
     if (msg?.type === 'gmcx-pause-media') {
       const media = getActiveMedia();
       if (media && !media.paused) media.pause?.();
+      showOverlayForMedia(media, '暂停');
       sendResponse({ ok: true });
       return;
     }
     if (msg?.type === 'gmcx-mute-media') {
       const media = getActiveMedia();
-      if (media) media.muted = true;
+      if (media) { media.muted = true; showOverlayForMedia(media, '静音'); }
       sendResponse({ok:true});
       return;
     }
     if (msg?.type === 'gmcx-unmute-media') {
       const media = getActiveMedia();
-      if (media) media.muted = false;
+      if (media) { media.muted = false; showOverlayForMedia(media, '取消静音'); }
       sendResponse({ok:true});
       return;
     }
@@ -576,6 +610,7 @@
         const vol = Math.min(1, Math.max(0, Number(msg.value)));
         media.volume = vol;
         if (vol > 0 && media.muted) media.muted = false;
+        showOverlayForMedia(media, `音量 ${(vol*100).toFixed(0)}%`);
       }
       sendResponse({ok:true});
       return;
@@ -654,14 +689,19 @@
     if (msg?.type === 'gmcx-seek-media') {
       const media = getActiveMedia();
       if (media && isFinite(media.duration)) {
-        media.currentTime = Math.max(0, Math.min(media.duration, media.currentTime + Number(msg.value)));
+        const delta = Number(msg.value) || 0;
+        media.currentTime = Math.max(0, Math.min(media.duration, media.currentTime + delta));
+        showOverlayForMedia(media, `${delta>=0? '快进':'快退'} ${Math.abs(delta)}s`);
       }
       sendResponse({ ok: true });
       return;
     }
     if (msg?.type === 'gmcx-set-media-speed') {
       const media = getActiveMedia();
-      if (media) media.playbackRate = Number(msg.value);
+      if (media) {
+        media.playbackRate = Number(msg.value);
+        showOverlayForMedia(media, `速度 ${media.playbackRate.toFixed(2)}×`);
+      }
       sendResponse({ ok: true });
       return;
     }
@@ -670,6 +710,7 @@
       if (media) {
         media.currentTime = 0;
         media.playbackRate = 1.0;
+        showOverlayForMedia(media, '重置');
       }
       sendResponse({ ok: true });
       return;
@@ -733,7 +774,9 @@
     if (msg?.type === 'gmcx-set-media-currentTime') {
       const media = getActiveMedia();
       if (media && isFinite(media.duration)) {
-        media.currentTime = Math.max(0, Math.min(media.duration, Number(msg.value)));
+        const target = Math.max(0, Math.min(media.duration, Number(msg.value)));
+        media.currentTime = target;
+        showOverlayForMedia(media, `跳转 ${formatTime(target)}`);
       }
       sendResponse({ ok: true });
       return;

@@ -225,6 +225,34 @@ async function togglePlayGlobal() {
   }
 }
 
+async function toggleMuteGlobal() {
+  if (GLOBAL_MEDIA.selectedIndex < 0) return;
+  const entry = GLOBAL_MEDIA.mediaList[GLOBAL_MEDIA.selectedIndex];
+  if (!entry) return;
+  const state = await sendToTab(entry.tab.id, {type:'gmcx-get-media-info'});
+  if (!state || !state.ok) return;
+  if (state.muted) {
+    await sendToTab(entry.tab.id, {type:'gmcx-unmute-media'});
+  } else {
+    await sendToTab(entry.tab.id, {type:'gmcx-mute-media'});
+  }
+  const after = await sendToTab(entry.tab.id, {type:'gmcx-get-media-info'});
+  if (after && after.ok) {
+    overlayUpdateOnActive({
+      mode:'mute-toggle',
+      index: GLOBAL_MEDIA.selectedIndex + 1,
+      total: GLOBAL_MEDIA.mediaList.length,
+      title: (entry.tab.title || entry.tab.url || '').slice(0,80),
+      paused: after.paused,
+      duration: after.duration,
+      currentTime: after.currentTime,
+      percent: after.rawDuration ? (after.rawCurrentTime / after.rawDuration) * 100 : 0,
+      preview: false,
+      playbackRate: after.playbackRate
+    });
+  }
+}
+
 async function applyPlaybackRate(rate) {
   if (GLOBAL_MEDIA.selectedIndex < 0) return;
   const entry = GLOBAL_MEDIA.mediaList[GLOBAL_MEDIA.selectedIndex];
@@ -343,5 +371,28 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     GLOBAL_MEDIA.forceGlobal = false;
     sendResponse && sendResponse({ok:true});
     return; // 不需要异步
+  }
+  if (msg?.type === 'gmcx-toggle-mute') {
+    (async () => {
+      const activeTab = await getActiveTab();
+      if (!activeTab || !activeTab.id) { sendResponse({ok:false}); return; }
+      // 若未进入全局模式，尝试本地优先
+      if (!GLOBAL_MEDIA.forceGlobal) {
+        const localInfo = await sendToTab(activeTab.id, {type:'gmcx-get-media-info'});
+        if (localInfo && localInfo.ok) {
+          if (localInfo.muted) await sendToTab(activeTab.id, {type:'gmcx-unmute-media'}); else await sendToTab(activeTab.id, {type:'gmcx-mute-media'});
+          sendResponse({ok:true, scope:'local'});
+          return;
+        }
+      }
+      await scanMediaAcrossTabs();
+      if (GLOBAL_MEDIA.selectedIndex >= 0) {
+        await toggleMuteGlobal();
+        sendResponse({ok:true, scope:'global'});
+      } else {
+        sendResponse({ok:false});
+      }
+    })();
+    return true; // async
   }
 });

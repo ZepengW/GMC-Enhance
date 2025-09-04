@@ -54,12 +54,15 @@ GMC-Enhance supports the following keyboard shortcuts for efficient media contro
 |-------------------------|---------------------|------------------------------------------------------------------------------------------------------------------|
 | Select Controlled Video | `Alt + Shift + V`   | Select which video to control.                                                                                   |
 | Play/Pause              | `Alt + Shift + K`   | Toggle play/pause for the selected video.<br>If you are on a page with a video, this shortcut controls that video by default unless you have selected another video using `Alt + Shift + U`. |
-| Backward                | `Alt + Shift + J`   | Skip backward (default: -5 seconds).<br>If you are on a page with a video, this shortcut controls that video by default unless you have selected another video using `Alt + Shift + U`.      |
-| Forward                 | `Alt + Shift + L`   | Skip forward (default: +5 seconds).<br>If you are on a page with a video, this shortcut controls that video by default unless you have selected another video using `Alt + Shift + U`.       |
+| Backward                | `Alt + Shift + J`   | Skip backward (default: -10 seconds).<br>If you are on a page with a video, this shortcut controls that video by default unless you have selected another video using `Alt + Shift + U`.      |
+| Forward                 | `Alt + Shift + L`   | Skip forward (default: +10 seconds).<br>If you are on a page with a video, this shortcut controls that video by default unless you have selected another video using `Alt + Shift + U`.       |
 | Speed Up                | `Alt + Shift + O`   | Increase playback speed (default: +0.25x).                                                                       |
 | Speed Down              | `Alt + Shift + U`   | Decrease playback speed (default: -0.25x).                                                                       |
 | Reset Speed             | `Alt + Shift + I`   | Reset playback speed to normal (default: 1x).                                                                    |
 | Set Speed               | `Alt + Shift + P`   | Cycle through preset playback speeds.                                                                            |
+| Volume Up               | `Alt + Shift + >`   | Increase volume (default: +5%).                                                                                |
+| Volume Down             | `Alt + Shift + <`   | Decrease volume (default: -5%).                                                                                 |
+| Mute/Unmute             | `Alt + Shift + M`   | Toggle mute/unmute.                                                                                              |
 
 **Tip**: By mapping shortcuts to a keyboard knob, you can achieve precise control over video progress, which was the inspiration behind this extension.
 

@@ -572,7 +572,7 @@
         titleCol.style.cssText = 'min-width:0;display:flex;align-items:center;gap:6px;overflow:hidden;';
         if (typeof p.paused === 'boolean') {
           const icon = document.createElement('span');
-          icon.textContent = p.paused ? '⏸' : '▶';
+          icon.textContent = p.paused ? '▶️' : '⏸️';
           icon.style.flex = 'none';
           titleCol.appendChild(icon);
         }

@@ -421,6 +421,7 @@
     label.style.cssText = 'display:flex;justify-content:space-between;align-items:center;font-size:12px;margin-top:4px;font-weight:500;';
     const left = document.createElement('span');
     const center = document.createElement('span');
+    center.style.cssText = 'flex:1;min-width:0;display:flex;align-items:center;gap:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center;padding:0 6px;';
     const right = document.createElement('span');
     label.appendChild(left); label.appendChild(center); label.appendChild(right);
     // 侧向轮播预览容器
@@ -428,8 +429,8 @@
     carousel.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-top:6px;opacity:.85;font-size:11px;gap:12px;';
     const prev = document.createElement('div');
     const next = document.createElement('div');
-    prev.style.cssText = 'flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.6;text-align:left;';
-    next.style.cssText = 'flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.6;text-align:right;';
+    prev.style.cssText = 'flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.45;text-align:left;min-height:16px;';
+    next.style.cssText = 'flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.45;text-align:right;min-height:16px;';
     carousel.appendChild(prev); carousel.appendChild(next);
     barOuter.appendChild(barFill);
     wrap.appendChild(label);
@@ -556,83 +557,64 @@
     if (msg?.type === 'gmcx-global-overlay') {
       if (msg.action === 'update') {
         const p = msg.payload || {};
-        const el = ensureFineOverlay(); // 复用 fine overlay 容器结构以减少样式重复
+        const el = ensureFineOverlay();
         el.wrap.style.opacity = '1';
-        // 标题 & 模式
-        let centerTxt = '';
-        // 播放状态图标
+        // Prepare grid container: two columns (title max 50%, status auto)
+        while (el.center.firstChild) el.center.removeChild(el.center.firstChild);
+        el.center.style.display = 'grid';
+        el.center.style.gridTemplateColumns = 'minmax(0,50%) auto';
+        el.center.style.alignItems = 'center';
+        el.center.style.columnGap = '18px';
+        el.center.style.justifyContent = 'center';
+        el.center.style.width = '100%';
+        // Title column content
+        const titleCol = document.createElement('div');
+        titleCol.style.cssText = 'min-width:0;display:flex;align-items:center;gap:6px;overflow:hidden;';
         if (typeof p.paused === 'boolean') {
-          centerTxt += p.paused ? '⏸ ' : '▶ ';
+          const icon = document.createElement('span');
+          icon.textContent = p.paused ? '⏸' : '▶';
+          icon.style.flex = 'none';
+          titleCol.appendChild(icon);
         }
-        centerTxt += p.title ? (p.title.slice(0,60)) : '全局控制';
-        // 速率
-        if (typeof p.playbackRate === 'number') {
-          centerTxt += ` | ${p.playbackRate.toFixed(2)}x`;
-        }
-        // 音量（若提供）
+        const titleSpan = document.createElement('span');
+        const fullTitle = p.title || '全局控制';
+        titleSpan.textContent = fullTitle;
+        titleSpan.title = fullTitle;
+        titleSpan.style.cssText = 'flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+        titleCol.appendChild(titleSpan);
+        // Status column content
+        const statusCol = document.createElement('div');
+        statusCol.style.cssText = 'display:flex;align-items:center;gap:12px;font-variant-numeric:tabular-nums;';
+        const rateSpan = document.createElement('span');
+        if (typeof p.playbackRate === 'number') rateSpan.textContent = p.playbackRate.toFixed(2) + 'x'; else rateSpan.textContent = '1.00x';
+        statusCol.appendChild(rateSpan);
+        const volSpan = document.createElement('span');
         if (typeof p.volume === 'number') {
-          const volPercent = Math.round(p.volume * 100);
           let volIcon = '🔊';
           if (p.muted || p.volume === 0) volIcon = '🔇';
           else if (p.volume < 0.33) volIcon = '🔈';
           else if (p.volume < 0.66) volIcon = '🔉';
-          centerTxt += ` | ${volIcon} ${volPercent}%`;
+          volSpan.textContent = `${volIcon} ${Math.round(p.volume*100)}%`;
+        } else if (p.muted) {
+          volSpan.textContent = '🔇';
+        } else {
+          volSpan.textContent = '—';
         }
-        el.center.textContent = centerTxt;
-        // 时间显示逻辑：如果是预览（seek 预估），currentTime 显示预估秒；否则显示真实
+        statusCol.appendChild(volSpan);
+        el.center.appendChild(titleCol);
+        el.center.appendChild(statusCol);
+        // Time & progress bar
         const leftLabel = p.preview && typeof p.previewSeconds === 'number' ? formatTime(p.previewSeconds) : (p.currentTime || '--:--');
         el.left.textContent = leftLabel;
         el.right.textContent = p.duration || '--:--';
         const percent = Math.max(0, Math.min(100, p.percent || 0));
         el.barFill.style.width = percent.toFixed(3) + '%';
-        if (p.preview) {
-          el.barFill.style.background = 'linear-gradient(90deg,#ffb347,#ffcc33)';
-        } else {
-          el.barFill.style.background = 'linear-gradient(90deg,#4facfe,#00f2fe)';
-        }
-        // 侧向预览：需要 payload 中给出 index / total，后台可已提供
-        if (typeof p.index === 'number' && typeof p.total === 'number' && p.total > 1) {
-          const total = p.total;
-            const cur = p.index - 1;
-          const prevIdx = (cur - 1 + total) % total;
-          const nextIdx = (cur + 1) % total;
-          // 后台尚未传递其他媒体标题，先用简化占位（可拓展后台传 prevTitle/nextTitle）
-          if (el.prev) el.prev.textContent = `◀ ${(prevIdx+1)}/${total}`;
-          if (el.next) el.next.textContent = `${(nextIdx+1)}/${total} ▶`;
-        } else {
-          if (el.prev) el.prev.textContent = '';
-          if (el.next) el.next.textContent = '';
-        }
+        el.barFill.style.background = p.preview ? 'linear-gradient(90deg,#ffb347,#ffcc33)' : 'linear-gradient(90deg,#4facfe,#00f2fe)';
+        // Hide side preview placeholders to give full width
+        if (el.prev) { el.prev.textContent=''; el.prev.style.display='none'; }
+        if (el.next) { el.next.textContent=''; el.next.style.display='none'; }
         resetOverlayAutoHide();
         return true;
-      }
-      // Enhance render: mutate existing fine overlay when global payload arrives
-      const p = msg.payload;
-      if (p) {
-        const el = ensureFineOverlay();
-        el.wrap.style.opacity = '1';
-        if (typeof p.percent === 'number') {
-          el.barFill.style.width = p.percent.toFixed(3) + '%';
-        }
-        el.left.textContent = p.currentTime || '--:--';
-        el.right.textContent = p.duration || '--:--';
-        // Center composition: index/total + play state + speed + volume/mute
-        let center = '';
-        if (p.index && p.total) center += `[${p.index}/${p.total}] `;
-        center += (p.paused ? '⏸' : '▶');
-        if (typeof p.playbackRate === 'number') center += ' ' + p.playbackRate.toFixed(2) + 'x';
-        if (p.muted) center += ' · 🔇';
-        else if (typeof p.volume === 'number') {
-          const v = Math.round(p.volume * 100);
-            if (v > 66) center += ' · 🔊'+v+'%';
-            else if (v > 33) center += ' · 🔉'+v+'%';
-            else center += ' · 🔈'+v+'%';
-        }
-        el.center.textContent = center;
-        // For global we might show surrounding titles soon; placeholder keep empty
-        el.prev.textContent = '';
-        el.next.textContent = p.title ? p.title : '';
-        resetOverlayAutoHide();
       }
     }
     if (msg?.type === 'gmcx-play-media') {

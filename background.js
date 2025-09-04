@@ -122,7 +122,9 @@ async function cycleGlobalSelection() {
         currentTime: fresh.currentTime,
         percent: fresh.rawDuration ? (fresh.rawCurrentTime / fresh.rawDuration) * 100 : 0,
         preview: false,
-        playbackRate: fresh.playbackRate
+        playbackRate: fresh.playbackRate,
+        volume: fresh.volume,
+        muted: fresh.muted
         // 这里暂未包含 volume/muted，后续同步点会补充
       });
       GLOBAL_MEDIA.baseTime = fresh.rawCurrentTime; // 直接设置基准
@@ -136,7 +138,10 @@ async function cycleGlobalSelection() {
         duration: info.duration,
         currentTime: '--:--',
         percent: 0,
-        preview: true
+        preview: true,
+        playbackRate: info.playbackRate,
+        volume: info.volume,
+        muted: info.muted
       });
     }
   } catch {
@@ -149,7 +154,10 @@ async function cycleGlobalSelection() {
       duration: info.duration,
       currentTime: '--:--',
       percent: 0,
-      preview: true
+      preview: true,
+      playbackRate: info.playbackRate,
+      volume: info.volume,
+      muted: info.muted
     });
   }
   GLOBAL_MEDIA.forceGlobal = true; // 用户显式切换后进入全局优先模式
@@ -173,7 +181,9 @@ async function ensureBaseTime() {
       currentTime: updated.currentTime,
       percent: updated.rawDuration ? (updated.rawCurrentTime / updated.rawDuration) * 100 : 0,
       preview: false,
-      playbackRate: updated.playbackRate
+      playbackRate: updated.playbackRate,
+      volume: updated.volume,
+      muted: updated.muted
     });
   }
 }
@@ -232,7 +242,10 @@ async function accumulateSeek(delta) {
     currentTime: '--:--', // 预览阶段不格式化真实时间
     previewSeconds: previewTime,
     percent,
-    preview: true
+    preview: true,
+    playbackRate: info.playbackRate,
+    volume: info.volume,
+    muted: info.muted
   });
   scheduleSeekCommit();
 }

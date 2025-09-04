@@ -1,5 +1,19 @@
 chrome.runtime.onInstalled.addListener(() => {});
 
+// =============================
+// 统一说明（2025-09 调整）：
+// 之前存在两套概念：
+//  A: 可在多个标签之间切换的“全局”悬浮控制卡片
+//  B: 当前页面（活动标签）本地视频的控制卡片
+// 需求：合并成单一界面逻辑 A，同时在“未显式全局切换”时，默认聚焦当前活动标签页上的媒体，
+//      只有用户使用 cycle-video（快捷键/命令）之后才进入强制全局循环模式 (forceGlobal=true)。
+// 本文件的改动实现：
+//  1) 添加 ensureActiveSelection：在非强制全局模式下刷新媒体列表后，会把 selectedIndex 自动指向当前活动标签页媒体。
+//  2) chrome.commands 里 seek / play / pause 等命令不再区分“本地”与“全局”两套分支，统一走 GLOBAL_MEDIA 列表。
+//  3) toggle mute 消息同样统一逻辑。
+//  4) 覆盖层展示（由 content.js 复用 fine overlay 结构）保持一致，不再出现两种卡片风格。
+// =============================
+
 // 全局跨标签媒体控制状态
 const GLOBAL_MEDIA = {
   mediaList: [], // [{tab, info}]
@@ -14,8 +28,27 @@ const GLOBAL_MEDIA = {
   speedStep: 0.25,
   speedPresets: [0.75, 1, 1.25, 1.5, 2],
   speedPresetIndex: 1,
-  forceGlobal: false // 在用户使用 cycle-video 后强制使用全局控制
+  forceGlobal: false // 在用户使用 cycle-video 后强制使用全局控制；未 force 时默认聚焦当前活动标签媒体
 };
+
+/**
+ * 在未进入强制全局模式 (forceGlobal=false) 时，尝试把当前活动标签页内的媒体
+ * 设置为 GLOBAL_MEDIA.selectedIndex ，以实现“同一套界面逻辑 A 默认聚焦当前页面媒体”。
+ * 若当前活动页没有媒体，则保持之前的选择（如果有）。
+ */
+async function ensureActiveSelection(activeTabId) {
+  if (GLOBAL_MEDIA.forceGlobal) return; // 用户显式全局循环后不再自动跳回
+  if (!GLOBAL_MEDIA.mediaList.length) return;
+  if (GLOBAL_MEDIA.selectedIndex >= 0) {
+    const cur = GLOBAL_MEDIA.mediaList[GLOBAL_MEDIA.selectedIndex];
+    if (cur && cur.tab && cur.tab.id === activeTabId) return; // 已是当前活动标签
+  }
+  const idx = GLOBAL_MEDIA.mediaList.findIndex(e => e.tab && e.tab.id === activeTabId);
+  if (idx >= 0) {
+    GLOBAL_MEDIA.selectedIndex = idx;
+    GLOBAL_MEDIA.baseTime = null; // 重新同步基准
+  }
+}
 
 function sendToContent(tabId, msg) {
   if (typeof tabId !== 'number') return;
@@ -313,35 +346,20 @@ async function getActiveTab() {
 chrome.commands.onCommand.addListener(async (command) => {
   const tab = await getActiveTab();
   if (!tab || !tab.id) return;
-  // 优先处理全局控制逻辑
+  // 统一逻辑：所有命令先刷新媒体列表，再根据 forceGlobal / 当前活动页自动聚焦，使用同一套 A 覆盖层
   if (command === 'cycle-video') {
     await scanMediaAcrossTabs(true);
-    await cycleGlobalSelection();
+    await cycleGlobalSelection(); // cycle 会设置 forceGlobal=true
     return;
   }
   if (['seek-forward','seek-back','toggle-play-pause'].includes(command)) {
-    if (!GLOBAL_MEDIA.forceGlobal) {
-      // 本地优先模式
-      const localInfo = await sendToTab(tab.id, {type:'gmcx-get-media-info'});
-      if (localInfo && localInfo.ok) {
-        if (command === 'toggle-play-pause') {
-          if (localInfo.paused) await sendToTab(tab.id, {type:'gmcx-play-media'}); else await sendToTab(tab.id, {type:'gmcx-pause-media'});
-          return;
-        }
-        if (command === 'seek-forward') { await sendToTab(tab.id, {type:'gmcx-seek-media', value: +5}); return; }
-        if (command === 'seek-back') { await sendToTab(tab.id, {type:'gmcx-seek-media', value: -5}); return; }
-      }
-    }
-    // 全局模式（或本地没有媒体 / 已 forceGlobal ）
     await scanMediaAcrossTabs();
-    if (GLOBAL_MEDIA.selectedIndex >= 0) {
-      if (command === 'toggle-play-pause') { await togglePlayGlobal(); return; }
-      if (command === 'seek-forward') { await accumulateSeek(+5); return; }
-      if (command === 'seek-back') { await accumulateSeek(-5); return; }
-    }
+    await ensureActiveSelection(tab.id); // 在非全局模式下优先当前活动标签媒体
+    if (GLOBAL_MEDIA.selectedIndex < 0) return; // 没有媒体则直接忽略
+    if (command === 'toggle-play-pause') { await togglePlayGlobal(); return; }
+    if (command === 'seek-forward') { await accumulateSeek(+5); return; }
+    if (command === 'seek-back') { await accumulateSeek(-5); return; }
   }
-  // 回落到本页局部控制
-  chrome.tabs.sendMessage(tab.id, { type: 'gmcx-command', command });
 });
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg?.type === "gmcx-capture-visible-tab") {
@@ -376,22 +394,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     (async () => {
       const activeTab = await getActiveTab();
       if (!activeTab || !activeTab.id) { sendResponse({ok:false}); return; }
-      // 若未进入全局模式，尝试本地优先
-      if (!GLOBAL_MEDIA.forceGlobal) {
-        const localInfo = await sendToTab(activeTab.id, {type:'gmcx-get-media-info'});
-        if (localInfo && localInfo.ok) {
-          if (localInfo.muted) await sendToTab(activeTab.id, {type:'gmcx-unmute-media'}); else await sendToTab(activeTab.id, {type:'gmcx-mute-media'});
-          sendResponse({ok:true, scope:'local'});
-          return;
-        }
-      }
+      // 统一：刷新并自动聚焦到当前活动标签的媒体（若未 forceGlobal ）
       await scanMediaAcrossTabs();
-      if (GLOBAL_MEDIA.selectedIndex >= 0) {
-        await toggleMuteGlobal();
-        sendResponse({ok:true, scope:'global'});
-      } else {
-        sendResponse({ok:false});
-      }
+      await ensureActiveSelection(activeTab.id);
+      if (GLOBAL_MEDIA.selectedIndex < 0) { sendResponse({ok:false}); return; }
+      await toggleMuteGlobal();
+      sendResponse({ok:true, scope: GLOBAL_MEDIA.forceGlobal ? 'global' : 'active-auto'});
     })();
     return true; // async
   }

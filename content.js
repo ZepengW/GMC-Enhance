@@ -16,7 +16,8 @@
     lastMediaWeak: null,
     fineOverlayEl: null,
     overlayHideTimer: null,
-    overlayHideDelay: 10000
+    overlayHideDelay: 5000 // 毫秒
+    , lastMediaScanTs: 0
   };
   // ====== EQ 状态 ======
   const EQ = {
@@ -566,7 +567,22 @@
           titleCol.appendChild(icon);
         }
         const titleSpan = document.createElement('span');
-        const fullTitle = p.title || '全局控制';
+        // 插入 [i/n] 标识：优先使用后台跨标签传来的全局 index/total（p.index 已是 1-based）
+        let indexPrefix = '';
+        if (typeof p.index === 'number' && typeof p.total === 'number' && p.total > 0) {
+          indexPrefix = `[${p.index}/${p.total}] `;
+        } else {
+          // 回退：仅在未提供全局数据时使用当前页面的缓存选择
+          try {
+            const current = resolveSelectedMedia();
+            const total = STATE.videosCache.length;
+            if (current && total) {
+              indexPrefix = `[${Math.min(STATE.selectedIndex + 1, total)}/${total}] `;
+            }
+          } catch {}
+        }
+        const baseTitle = p.title || '全局控制';
+        const fullTitle = indexPrefix + baseTitle;
         titleSpan.textContent = fullTitle;
         titleSpan.title = fullTitle;
         titleSpan.style.cssText = 'flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';

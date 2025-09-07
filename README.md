@@ -17,6 +17,7 @@ Global Media Control (GMC)-Enhance is a Chrome extension that supercharges Chrom
    - [Shortcuts](#3-shortcuts)
 3. [Contributing](#contributing)
 4. [License](#license)
+5. [Permissions](#permissions)
 
 ---
 
@@ -89,3 +90,13 @@ For major changes, please open an issue first to discuss what you would like to 
 ## License
 
 This project is licensed under the [GNU General Public License v3.0](https://www.gnu.org/licenses/gpl-3.0.en.html). You are free to use, modify, and distribute this software under the terms of the GPL-3.0 license, which ensures that derivative works remain open source.
+
+---
+
+## Permissions
+
+GMC-Enhance requests the minimum permissions required for its features:
+
+- `activeTab`: Required to interact with the current tab when the user invokes the extension UI and for capturing the visible tab for screenshots.
+- `tabs`: Needed to enumerate tabs and message them for media info/control.
+- `storage`: Saves preferences like seek/speed steps, EQ presets, and volume step.

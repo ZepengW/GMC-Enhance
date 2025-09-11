@@ -4,7 +4,7 @@ Unified Control · Powerful Shortcuts · Independent Tab Sessions
 
 Global Media Control (GMC)-Enhance is a Chrome extension that supercharges Chrome's built‑in Global Media Control. It delivers true **unified control** across all your media, **global shortcuts** for instant actions, and **independent tab sessions** so each tab keeps its own playback, speed, and effect state without interference.
 
-![Logo](docs\imgs\banner.png)
+![Logo](docs/imgs/banner.png)
 
 ---
 
@@ -40,7 +40,7 @@ GMC-Enhance offers a range of features to improve your media playback experience
 ### 1. Basic Playback Control
 
 Control video playback directly from the toolbar or using keyboard shortcuts. Supported actions include play, pause, skip backward/forward, and speed adjustments.
-![Popup Page](docs\imgs\popup-page.png)
+![Popup Page](docs/imgs/popup-page.png)
 
 ### 2. Audio Effects Control
 
@@ -69,7 +69,7 @@ GMC-Enhance supports the following keyboard shortcuts for fast, interruption‑f
 | Volume Down             | `Alt + Shift + <`   | Decrease volume (default: -5%).                                                                                 |
 | Mute/Unmute             | `Alt + Shift + M`   | Toggle mute/unmute.                                                                                              |
 
-![Floating Video Control](docs\imgs\video_float_card.gif)
+![Floating Video Control](docs/imgs/video_float_card.gif)
 
 **Tip**: By mapping shortcuts to a keyboard knob, you can achieve precise control over video progress, which was the inspiration behind this extension.
 
@@ -90,6 +90,7 @@ For major changes, please open an issue first to discuss what you would like to 
 ## License
 
 This project is licensed under the [GNU General Public License v3.0](https://www.gnu.org/licenses/gpl-3.0.en.html). You are free to use, modify, and distribute this software under the terms of the GPL-3.0 license, which ensures that derivative works remain open source.
+<<<<<<< HEAD
 
 ---
 
@@ -100,3 +101,5 @@ GMC-Enhance requests the minimum permissions required for its features:
 - `activeTab`: Required to interact with the current tab when the user invokes the extension UI and for capturing the visible tab for screenshots.
 - `tabs`: Needed to enumerate tabs and message them for media info/control.
 - `storage`: Saves preferences like seek/speed steps, EQ presets, and volume step.
+=======
+>>>>>>> 75098898192ec9be4b256f0318a1a5a777b46948

@@ -1,105 +1,92 @@
+[English](README_en.md) | [中文](README.md)
+
 # GMC-Enhance
 
-Unified Control · Powerful Shortcuts · Independent Tab Sessions
+统一控制 · 强大的快捷键 · 独立的标签页会话
 
-Global Media Control (GMC)-Enhance is a Chrome extension that supercharges Chrome's built‑in Global Media Control. It delivers true **unified control** across all your media, **global shortcuts** for instant actions, and **independent tab sessions** so each tab keeps its own playback, speed, and effect state without interference.
+Global Media Control (GMC)-Enhance 是一个 Chrome 扩展程序，它增强了 Chrome 内置的全局媒体控制功能。它提供了真正的**统一控制**，**全局快捷键**实现即时操作，以及**独立的标签页会话**，使每个标签页保持其播放、速度和效果状态而互不干扰。
 
 ![Logo](docs/imgs/banner.png)
 
----
+## 目录
 
-## Table of Contents
+1. [功能](#功能)
+2. [用户指南](#用户指南)
+   - [基本播放控制](#1-基本播放控制)
+   - [音频效果控制](#2-音频效果控制)
+   - [快捷键](#3-快捷键)
+3. [贡献](#贡献)
+4. [许可证](#许可证)
+5. [权限](#权限)
 
-1. [Features](#features)
-2. [User Guide](#user-guide)
-   - [Basic Playback Control](#1-basic-playback-control)
-   - [Audio Effects Control](#2-audio-effects-control)
-   - [Shortcuts](#3-shortcuts)
-3. [Contributing](#contributing)
-4. [License](#license)
-5. [Permissions](#permissions)
+## 功能
 
----
+GMC-Enhance 提供了一系列功能来改善您的媒体播放体验：
 
-## Features
+- [x] **统一媒体控制**：通过单一工具栏界面管理所有媒体会话，无需切换标签页。
+- [x] **播放控制**：播放、暂停、快退/快进以及调整播放速度。
+- [x] **全局快捷键**：可自定义的键盘快捷键实现即时控制（快进、速度、音量、静音、选择活动视频）。
+- [x] **独立的标签页会话**：每个标签页保持其播放速度、选定目标视频、音量和音频效果状态，无意的跨标签干扰将不再发生。
+- [x] **音量控制**：调整单个视频的音量，包括静音/取消静音选项。
+- [x] **音频效果**：通过调整特定频段（例如降低人声或增强低音）来提升音频质量。
+- [x] **浮动窗口**：通过快捷键调整时显示浮动窗口，方便查看当前状态。
 
-GMC-Enhance offers a range of features to improve your media playback experience:
+## 用户指南
 
-- [x] **Unified Media Control**: Manage all media sessions from a single toolbar interface without switching tabs.
-- [x] **Playback Control**: Play, pause, skip backward/forward, and adjust playback speed.
-- [x] **Global Shortcuts**: Customizable keyboard shortcuts for instant control (seek, speed, volume, mute, select active video).
-- [x] **Independent Tab Sessions**: Each tab maintains its own playback speed, selected target video, volume, and audio effect state—no accidental cross‑tab interference.
-- [x] **Volume Control**: Adjust volume levels for individual videos, including mute/unmute options.
-- [x] **Audio Effects**: Enhance audio quality by adjusting specific frequency bands (e.g., reduce vocals or boost bass).
-- [x] **Floating Window**: Displays a floating window when adjusting via shortcuts, making it easy to view the current status.
+### 1. 基本播放控制
 
----
-
-## User Guide
-
-### 1. Basic Playback Control
-
-Control video playback directly from the toolbar or using keyboard shortcuts. Supported actions include play, pause, skip backward/forward, and speed adjustments.
+直接通过工具栏或键盘快捷键控制视频播放。支持的操作包括播放、暂停、快退/快进以及速度调整。
 ![Popup Page](docs/imgs/popup-page.png)
 
-### 2. Audio Effects Control
+### 2. 音频效果控制
 
-Enhance your listening experience with advanced audio controls. For example:
+通过高级音频控制提升您的聆听体验。例如：
 
-- Reduce vocal volume by lowering the 1kHz–4kHz frequency range.
-- Boost bass by increasing low-frequency bands.
+- 通过降低 1kHz–4kHz 频段的频率来减少人声音量。
+- 通过增加低频段来增强低音。
 
-These adjustments are particularly useful for live streams or videos with unbalanced audio.
+这些调整对直播或音频不平衡的视频特别有用。
 
-### 3. Shortcuts (Global & Customizable)
+### 3. 快捷键（全局 & 可自定义）
 
-GMC-Enhance supports the following keyboard shortcuts for fast, interruption‑free media control. You can remap them in Chrome's extension shortcut settings.
+GMC-Enhance 支持以下键盘快捷键，用于快速、无干扰的媒体控制。您可以在 Chrome 的扩展快捷键设置中重新映射它们。
 
-| Action                  | Shortcut            | Description                                                                                                      |
-|-------------------------|---------------------|------------------------------------------------------------------------------------------------------------------|
-| Select Controlled Video | `Alt + Shift + V`   | Select which video to control.                                                                                   |
-| Play/Pause              | `Alt + Shift + K`   | Toggle play/pause for the selected video.<br>If you are on a page with a video, this shortcut controls that video by default unless you have selected another video using `Alt + Shift + U`. |
-| Backward                | `Alt + Shift + J`   | Skip backward (default: -10 seconds).<br>If you are on a page with a video, this shortcut controls that video by default unless you have selected another video using `Alt + Shift + U`.      |
-| Forward                 | `Alt + Shift + L`   | Skip forward (default: +10 seconds).<br>If you are on a page with a video, this shortcut controls that video by default unless you have selected another video using `Alt + Shift + U`.       |
-| Speed Up                | `Alt + Shift + O`   | Increase playback speed (default: +0.25x).                                                                       |
-| Speed Down              | `Alt + Shift + U`   | Decrease playback speed (default: -0.25x).                                                                       |
-| Reset Speed             | `Alt + Shift + I`   | Reset playback speed to normal (default: 1x).                                                                    |
-| Set Speed               | `Alt + Shift + P`   | Cycle through preset playback speeds.                                                                            |
-| Volume Up               | `Alt + Shift + >`   | Increase volume (default: +5%).                                                                                |
-| Volume Down             | `Alt + Shift + <`   | Decrease volume (default: -5%).                                                                                 |
-| Mute/Unmute             | `Alt + Shift + M`   | Toggle mute/unmute.                                                                                              |
+| 操作                  | 快捷键              | 描述                                                                                                      |
+|-|||-
+| 选择控制的视频        | `Alt + Shift + V`   | 选择要控制的视频。                                                                                   |
+| 播放/暂停             | `Alt + Shift + K`   | 切换选定视频的播放/暂停状态。<br>如果您在有视频的页面上，默认情况下此快捷键控制该视频，除非您已使用 `Alt + Shift + U` 选择了其他视频。 |
+| 快退                  | `Alt + Shift + J`   | 快退（默认：-10 秒）。<br>如果您在有视频的页面上，默认情况下此快捷键控制该视频，除非您已使用 `Alt + Shift + U` 选择了其他视频。      |
+| 快进                  | `Alt + Shift + L`   | 快进（默认：+10 秒）。<br>如果您在有视频的页面上，默认情况下此快捷键控制该视频，除非您已使用 `Alt + Shift + U` 选择了其他视频。       |
+| 加速播放              | `Alt + Shift + O`   | 增加播放速度（默认：+0.25x）。                                                                       |
+| 减速播放              | `Alt + Shift + U`   | 减少播放速度（默认：-0.25x）。                                                                       |
+| 重置速度              | `Alt + Shift + I`   | 将播放速度重置为正常（默认：1x）。                                                                    |
+| 设置速度              | `Alt + Shift + P`   | 在预设播放速度之间循环切换。                                                                            |
+| 增加音量              | `Alt + Shift + >`   | 增加音量（默认：+5%）。                                                                                |
+| 减少音量              | `Alt + Shift + <`   | 减少音量（默认：-5%）。                                                                                 |
+| 静音/取消静音         | `Alt + Shift + M`   | 切换静音/取消静音。                                                                                              |
 
 ![Floating Video Control](docs/imgs/video_float_card.gif)
 
-**Tip**: By mapping shortcuts to a keyboard knob, you can achieve precise control over video progress, which was the inspiration behind this extension.
+**提示**：通过将快捷键映射到键盘旋钮，您可以精确控制视频进度，这也是开发此扩展的灵感来源。
 
----
+## 贡献
 
-## Contributing
+欢迎贡献！如果您想为 GMC-Enhance 做出贡献，请按照以下步骤操作：
 
-Contributions are welcome! If you'd like to contribute to GMC-Enhance, please follow these steps:
+1. Fork 此仓库。
+2. 为您的功能或错误修复创建一个新分支。
+3. 提交更改并提交拉取请求。
 
-1. Fork the repository.
-2. Create a new branch for your feature or bug fix.
-3. Commit your changes and submit a pull request.
+对于重大更改，请先打开一个 issue 讨论您想要更改的内容。
 
-For major changes, please open an issue first to discuss what you would like to change.
+## 许可证
 
----
+此项目根据 [GNU 通用公共许可证 v3.0](https://www.gnu.org/licenses/gpl-3.0.en.html) 许可。您可以根据 GPL-3.0 许可证的条款自由使用、修改和分发此软件，该许可证确保衍生作品保持开源。
 
-## License
+## 权限
 
-This project is licensed under the [GNU General Public License v3.0](https://www.gnu.org/licenses/gpl-3.0.en.html). You are free to use, modify, and distribute this software under the terms of the GPL-3.0 license, which ensures that derivative works remain open source.
-<<<<<<< HEAD
+GMC-Enhance 请求其功能所需的最低权限：
 
----
-
-## Permissions
-
-GMC-Enhance requests the minimum permissions required for its features:
-
-- `activeTab`: Required to interact with the current tab when the user invokes the extension UI and for capturing the visible tab for screenshots.
-- `tabs`: Needed to enumerate tabs and message them for media info/control.
-- `storage`: Saves preferences like seek/speed steps, EQ presets, and volume step.
-=======
->>>>>>> 75098898192ec9be4b256f0318a1a5a777b46948
+- `activeTab`：在用户调用扩展 UI 时与当前标签页交互，并捕获可见标签页的屏幕截图。
+- `tabs`：需要枚举标签页并向其发送消息以获取媒体信息/控制。
+- `storage`：保存偏好设置，如快进/速度步长、均衡器预设和音量步长。

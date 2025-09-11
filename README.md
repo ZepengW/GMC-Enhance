@@ -4,7 +4,7 @@ Unified Control · Powerful Shortcuts · Independent Tab Sessions
 
 Global Media Control (GMC)-Enhance is a Chrome extension that supercharges Chrome's built‑in Global Media Control. It delivers true **unified control** across all your media, **global shortcuts** for instant actions, and **independent tab sessions** so each tab keeps its own playback, speed, and effect state without interference.
 
-![Logo](docs\imgs\banner.png)
+![Logo](docs/imgs/banner.png)
 
 ---
 
@@ -39,7 +39,7 @@ GMC-Enhance offers a range of features to improve your media playback experience
 ### 1. Basic Playback Control
 
 Control video playback directly from the toolbar or using keyboard shortcuts. Supported actions include play, pause, skip backward/forward, and speed adjustments.
-![Popup Page](docs\imgs\popup-page.png)
+![Popup Page](docs/imgs/popup-page.png)
 
 ### 2. Audio Effects Control
 
@@ -68,7 +68,7 @@ GMC-Enhance supports the following keyboard shortcuts for fast, interruption‑f
 | Volume Down             | `Alt + Shift + <`   | Decrease volume (default: -5%).                                                                                 |
 | Mute/Unmute             | `Alt + Shift + M`   | Toggle mute/unmute.                                                                                              |
 
-![Floating Video Control](docs\imgs\video_float_card.gif)
+![Floating Video Control](docs/imgs/video_float_card.gif)
 
 **Tip**: By mapping shortcuts to a keyboard knob, you can achieve precise control over video progress, which was the inspiration behind this extension.
 

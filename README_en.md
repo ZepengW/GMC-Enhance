@@ -57,7 +57,7 @@ These adjustments are particularly useful for live streams or videos with unbala
 GMC-Enhance supports the following keyboard shortcuts for fast, interruption‑free media control. You can remap them in Chrome's extension shortcut settings.
 
 | Action                  | Shortcut            | Description                                                                                                      |
-|-|||
+|------------------------|---------------------|------------------------------------------------------------------------------------------------------------------|
 | Select Controlled Video | `Alt + Shift + V`   | Select which video to control.                                                                                   |
 | Play/Pause              | `Alt + Shift + K`   | Toggle play/pause for the selected video.<br>If you are on a page with a video, this shortcut controls that video by default unless you have selected another video using `Alt + Shift + U`. |
 | Backward                | `Alt + Shift + J`   | Skip backward (default: -10 seconds).<br>If you are on a page with a video, this shortcut controls that video by default unless you have selected another video using `Alt + Shift + U`.      |
@@ -66,8 +66,8 @@ GMC-Enhance supports the following keyboard shortcuts for fast, interruption‑f
 | Speed Down              | `Alt + Shift + U`   | Decrease playback speed (default: -0.25x).                                                                       |
 | Reset Speed             | `Alt + Shift + I`   | Reset playback speed to normal (default: 1x).                                                                    |
 | Set Speed               | `Alt + Shift + P`   | Cycle through preset playback speeds.                                                                            |
-| Volume Up               | `Alt + Shift + >`   | Increase volume (default: +5%).                                                                                |
-| Volume Down             | `Alt + Shift + <`   | Decrease volume (default: -5%).                                                                                 |
+| Volume Up               | `Alt + Shift + >`   | Increase volume (default: +5%).                                                                                  |
+| Volume Down             | `Alt + Shift + <`   | Decrease volume (default: -5%).                                                                                  |
 | Mute/Unmute             | `Alt + Shift + M`   | Toggle mute/unmute.                                                                                              |
 
 ![Floating Video Control](docs/imgs/video_float_card.gif)

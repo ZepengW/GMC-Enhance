@@ -28,7 +28,7 @@ GMC-Enhance offers a range of features to improve your media playback experience
 
 - [x] **Unified Media Control**: Manage all media sessions from a single toolbar interface without switching tabs.
 - [x] **Playback Control**: Play, pause, skip backward/forward, and adjust playback speed.
-- [x] **Global Shortcuts**: Customizable keyboard shortcuts for instant control (seek, speed, volume, mute, select active video).
+- [x] **Global Shortcuts**: Keyboard shortcuts for instant control (seek, speed, volume, mute, select active video).
 - [x] **Independent Tab Sessions**: Each tab maintains its own playback speed, selected target video, volume, and audio effect state—no accidental cross‑tab interference.
 - [x] **Volume Control**: Adjust volume levels for individual videos, including mute/unmute options.
 - [x] **Audio Effects**: Enhance audio quality by adjusting specific frequency bands (e.g., reduce vocals or boost bass).
@@ -52,9 +52,9 @@ Enhance your listening experience with advanced audio controls. For example:
 
 These adjustments are particularly useful for live streams or videos with unbalanced audio.
 
-### 3. Shortcuts (Global & Customizable)
+### 3. Shortcuts
 
-GMC-Enhance supports the following keyboard shortcuts for fast, interruption‑free media control. You can remap them in Chrome's extension shortcut settings.
+GMC-Enhance supports the following keyboard shortcuts for fast, interruption‑free media control. In future versions, we will support customizable shortcuts.
 
 | Action                  | Shortcut            | Description                                                                                                      |
 |------------------------|---------------------|------------------------------------------------------------------------------------------------------------------|

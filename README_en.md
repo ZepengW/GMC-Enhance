@@ -16,9 +16,10 @@ Global Media Control (GMC)-Enhance is a Chrome extension that supercharges Chrom
    - [Basic Playback Control](#1-basic-playback-control)
    - [Audio Effects Control](#2-audio-effects-control)
    - [Shortcuts](#3-shortcuts)
-3. [Contributing](#contributing)
-4. [License](#license)
-5. [Permissions](#permissions)
+3. [Installation](#installation)
+4. [Contributing](#contributing)
+5. [License](#license)
+6. [Permissions](#permissions)
 
 
 
@@ -74,7 +75,21 @@ GMC-Enhance supports the following keyboard shortcuts for fast, interruption‑f
 
 **Tip**: By mapping shortcuts to a keyboard knob, you can achieve precise control over video progress, which was the inspiration behind this extension.
 
+## Installation
 
+### Method 1: Install from Chrome Web Store
+
+- Visit the [Chrome Web Store GMC-Enhance page](https://chromewebstore.google.com/detail/kibmlbbigjmpmfjpcjhlmimehchnamgi?utm_source=item-share-cb).
+- Click “Add to Chrome” and follow the prompts to complete installation.
+
+### Method 2: Install via ZIP Package (for local use or if the store is inaccessible)
+
+1. Go to the [GitHub Release page](https://github.com/ZepengW/GMC-Enhance/releases) and download the latest ZIP package.
+2. Extract the ZIP file to a local folder.
+3. Open Chrome and navigate to `chrome://extensions/`.
+4. Enable “Developer mode” in the top right corner.
+5. Click “Load unpacked” and select the extracted folder.
+6. GMC-Enhance is now installed and ready to use.
 
 ## Contributing
 

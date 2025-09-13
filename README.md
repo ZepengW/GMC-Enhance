@@ -15,9 +15,11 @@ Global Media Control (GMC)-Enhance 是一个 Chrome 扩展程序，它增强了 
    - [基本播放控制](#1-基本播放控制)
    - [音频效果控制](#2-音频效果控制)
    - [快捷键](#3-快捷键)
-3. [贡献](#贡献)
-4. [许可证](#许可证)
-5. [权限](#权限)
+3. [安装方法](#安装方法)
+4. [贡献](#贡献)
+5. [许可证](#许可证)
+6. [权限](#权限)
+
 
 ## 功能
 
@@ -68,6 +70,22 @@ GMC-Enhance 支持以下键盘快捷键，用于快速、无干扰的媒体控�
 ![Floating Video Control](docs/imgs/video_float_card.gif)
 
 **提示**：通过将快捷键映射到键盘旋钮，您可以精确控制视频进度，这也是开发此扩展的灵感来源。
+
+## 安装方法
+
+### 方式一：谷歌商店直接安装
+
+- 打开 [Chrome 网上应用店 GMC-Enhance 页面](https://chromewebstore.google.com/detail/kibmlbbigjmpmfjpcjhlmimehchnamgi?utm_source=item-share-cb)。
+- 点击“添加至 Chrome”按钮，按提示完成安装。
+
+### 方式二：解压安装（适用于无法访问商店或本地调试）
+
+1. 前往 [GitHub Release 页面](https://github.com/ZepengW/GMC-Enhance/releases) 下载最新的安装包（ZIP格式）。
+2. 解压下载的 ZIP 文件到本地文件夹。
+3. 打开 Chrome，进入 `chrome://extensions/` 页面。
+4. 开启右上角“开发者模式”。
+5. 点击“加载已解压的扩展程序”，选择刚才解压的文件夹。
+6. 安装完成后即可使用 GMC-Enhance。
 
 ## 贡献
 

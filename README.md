@@ -2,6 +2,8 @@
 
 # GMC-Enhance
 
+[![Chrome Web Store](https://img.shields.io/chrome-web-store/v/kibmlbbigjmpmfjpcjhlmimehchnamgi?label=Chrome%20Web%20Store&logo=googlechrome&logoColor=white)](https://chromewebstore.google.com/detail/kibmlbbigjmpmfjpcjhlmimehchnamgi)
+
 统一控制 · 强大的快捷键 · 独立的标签页会话
 
 Global Media Control (GMC)-Enhance 是一个 Chrome 扩展程序，它增强了 Chrome 内置的全局媒体控制功能。它提供了真正的**统一控制**，**全局快捷键**实现即时操作，以及**独立的标签页会话**，使每个标签页保持其播放、速度和效果状态而互不干扰。
@@ -51,7 +53,7 @@ GMC-Enhance 提供了一系列功能来改善您的媒体播放体验：
 
 ### 3. 快捷键
 
-GMC-Enhance 支持以下键盘快捷键，用于快速、无干扰的媒体控制。后续版本中，我们将支持自定义快捷键。
+GMC-Enhance 支持以下键盘快捷键，用于快速、无干扰的媒体控制，并支持自定义快捷键（右键图片，点击“选项”）。
 
 | 操作                  | 快捷键              | 描述                                                                                                      |
 |-----------------------|---------------------|-----------------------------------------------------------------------------------------------------------|

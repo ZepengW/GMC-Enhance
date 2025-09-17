@@ -41,6 +41,9 @@ const seekLocks = new Set();
 const seekAccum = new Map();
 // 累积提交延迟（毫秒）——在此时间内继续点击会继续累加，不会真正发送 seek
 const SEEK_ACCUM_DEBOUNCE = 480; // 可按需调整
+// 在提交 seek 或拖动松开后，短暂冻结整表重渲染，避免列表短暂空缺导致卡片闪烁
+let REFRESH_FREEZE_UNTIL = 0;
+const FREEZE_MS = 1000;
 
 function renderMediaList(mediaList) {
   const container = document.getElementById('media-list');
@@ -158,6 +161,7 @@ function renderMediaList(mediaList) {
       clearTimeout(entry.timer);
       entry.timer = setTimeout(async () => {
         // 提交阶段：上锁，发送最终 seek，然后刷新
+        REFRESH_FREEZE_UNTIL = Date.now() + FREEZE_MS;
         const delta = entry.pending;
         seekAccum.delete(tabId);
         if (delta === 0) return;
@@ -180,13 +184,13 @@ function renderMediaList(mediaList) {
       }
       entry.pending += delta;
       // 预览：本地更新 seekBar 与时间（不发送消息）
-  const sb = getSeekBar();
+      const sb = getSeekBar();
       if (sb) {
         const duration = Number(sb.max) || entry.base + entry.pending; // 防止 NaN
         let preview = entry.base + entry.pending;
         if (isFinite(duration)) preview = Math.min(Math.max(0, preview), duration);
         sb.value = preview;
-  const tEl = getTimeEl();
+        const tEl = getTimeEl();
         if (tEl) tEl.textContent = formatTimeLocal(preview);
       }
       scheduleSeekCommit(tabId);
@@ -479,6 +483,7 @@ function renderMediaList(mediaList) {
     const endDrag = async (finalVal) => {
       if (!dragging) return;
       try {
+        REFRESH_FREEZE_UNTIL = Date.now() + FREEZE_MS;
         await sendToTab(tab.id, {type: 'gmcx-set-media-currentTime', value: finalVal});
         // 松开后立即获取一次最新状态（精确同步）
         const updated = await sendToTab(tab.id, {type: 'gmcx-get-media-info'});
@@ -552,7 +557,9 @@ function shallowEqualMediaList(a, b) {
 
 async function refreshMediaList(full = false) {
   const mediaList = await getAllMediaInfo();
-  if (full || !shallowEqualMediaList(mediaList, lastMediaList)) {
+  const now = Date.now();
+  const freeze = now < REFRESH_FREEZE_UNTIL;
+  if (!freeze && (full || !shallowEqualMediaList(mediaList, lastMediaList))) {
     renderMediaList(mediaList);
     lastMediaList = mediaList;
   } else {
@@ -561,7 +568,7 @@ async function refreshMediaList(full = false) {
     mediaList.forEach(({tab, info}) => {
       const card = cards.find(c => c.dataset.tabId === String(tab.id));
       if (!card) return;
-      const locked = seekLocks.has(String(tab.id));
+      const locked = seekLocks.has(String(tab.id)) || seekAccum.has(tab.id);
       // 若该卡片在拖动锁中，跳过时间与进度条更新，避免冲突
       if (!locked) {
         card.querySelector('.media-time').textContent = info.currentTime;
@@ -613,6 +620,13 @@ document.addEventListener('DOMContentLoaded', () => {
   // 提前请求，渲染后移除隐藏状态
   refreshMediaList(true);
   refreshTimer = setInterval(() => refreshMediaList(false), 1000);
+  // 在冻结窗口内，跳过一次列表重建，避免闪烁
+  setInterval(() => {
+    if (Date.now() < REFRESH_FREEZE_UNTIL) {
+      // 轻量增量刷新（不重建）
+      refreshMediaList(false);
+    }
+  }, 300);
 });
 
 window.addEventListener('unload', () => {

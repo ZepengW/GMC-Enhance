@@ -108,6 +108,7 @@ function renderMediaList(mediaList) {
           <input class="eq-save-name" type="text" placeholder="自定义名称" style="flex:1;min-width:120px;font-size:12px;padding:4px 6px;">
           <button class="media-btn eq-save" style="font-size:12px;">保存</button>
           <button class="media-btn eq-del" style="font-size:12px;display:none;">删除</button>
+          <button class="media-btn eq-reset" style="font-size:12px;">恢复原始音效</button>
         </div>
         <div class="eq-bands" style="display:flex;gap:8px;justify-content:space-between;">
         </div>
@@ -214,8 +215,27 @@ function renderMediaList(mediaList) {
     const eqSaveName = card.querySelector('.eq-save-name');
     const eqSaveBtn = card.querySelector('.eq-save');
     const eqDelBtn = card.querySelector('.eq-del');
+    const eqResetBtn = card.querySelector('.eq-reset');
     let eqGains = [];
     let eqFreqs = [];
+    let eqBuiltin = [];
+    let eqCustom = [];
+    const approxEqual = (a,b,eps=0.1) => Array.isArray(a) && Array.isArray(b) && a.length===b.length && a.every((v,i)=>Math.abs((+v)-(+b[i]))<=eps);
+    const PH_VAL = '__current_custom__';
+    function ensureCustomPlaceholder() {
+      let opt = eqPresetSelect.querySelector(`option[value="${PH_VAL}"]`);
+      if (!opt) {
+        opt = document.createElement('option');
+        opt.value = PH_VAL;
+        opt.textContent = '自定义';
+        eqPresetSelect.insertBefore(opt, eqPresetSelect.firstChild || null);
+      }
+      return opt;
+    }
+    function removeCustomPlaceholder() {
+      const opt = eqPresetSelect.querySelector(`option[value="${PH_VAL}"]`);
+      if (opt) opt.remove();
+    }
     function renderBands() {
       eqBandsWrap.innerHTML = '';
       eqFreqs.forEach((f, idx) => {
@@ -236,6 +256,23 @@ function renderMediaList(mediaList) {
           debounceTimer=setTimeout(()=>{
             sendToTab(tab.id,{type:'gmcx-eq-set-band', index: idx, value: v});
           },120);
+          // 更新选择与保存按钮可见性
+          const allPresets = [...eqBuiltin, ...eqCustom];
+          const matched = allPresets.find(p => approxEqual(eqGains, p.gains));
+          if (matched) {
+            eqPresetSelect.value = matched.name;
+            const isCustom = eqCustom.some(p => p.name === matched.name);
+            eqDelBtn.style.display = isCustom ? 'inline-block' : 'none';
+            eqSaveBtn.style.display = 'none';
+            // 有匹配则移除占位
+            removeCustomPlaceholder();
+          } else {
+            // 无匹配则确保占位项存在并选中
+            ensureCustomPlaceholder();
+            eqPresetSelect.value = PH_VAL;
+            eqDelBtn.style.display = 'none';
+            eqSaveBtn.style.display = 'inline-block';
+          }
         });
         col.appendChild(lab); col.appendChild(slider); col.appendChild(val);
         eqBandsWrap.appendChild(col);
@@ -245,15 +282,38 @@ function renderMediaList(mediaList) {
       const resp = await sendToTab(tab.id, {type:'gmcx-eq-init'});
       if (!resp || !resp.ok) return;
       eqFreqs = resp.freqs; eqGains = resp.gains;
+      eqBuiltin = Array.isArray(resp.builtin) ? resp.builtin : [];
+      eqCustom = Array.isArray(resp.custom) ? resp.custom : [];
       // 预设
       eqPresetSelect.innerHTML='';
       const groupBuiltin = document.createElement('optgroup'); groupBuiltin.label='内置';
       resp.builtin.forEach(p=>{ const o=document.createElement('option'); o.value=p.name; o.textContent=p.name; groupBuiltin.appendChild(o); });
-      eqPresetSelect.appendChild(groupBuiltin);
       const groupCustom = document.createElement('optgroup'); groupCustom.label='自定义';
       resp.custom.forEach(p=>{ const o=document.createElement('option'); o.value=p.name; o.textContent=p.name; groupCustom.appendChild(o); });
-      eqPresetSelect.appendChild(groupCustom);
-      eqDelBtn.style.display='none';
+      // 匹配当前 gains 到某个预设，按需决定是否渲染占位项
+      const allPresets = [...resp.builtin, ...resp.custom];
+      const matched = allPresets.find(p => approxEqual(eqGains, p.gains));
+      if (matched) {
+        // 不渲染占位项
+        eqPresetSelect.appendChild(groupBuiltin);
+        eqPresetSelect.appendChild(groupCustom);
+        eqPresetSelect.value = matched.name;
+        // 自定义匹配则显示删除按钮
+        const isCustom = resp.custom.some(p => p.name === matched.name);
+        eqDelBtn.style.display = isCustom ? 'inline-block' : 'none';
+        eqSaveBtn.style.display = 'none';
+      } else {
+        // 渲染占位项（显示为“自定义”），仅在不匹配时
+        const placeholder = document.createElement('option');
+        placeholder.value = PH_VAL;
+        placeholder.textContent = '自定义';
+        eqPresetSelect.appendChild(placeholder);
+        eqPresetSelect.appendChild(groupBuiltin);
+        eqPresetSelect.appendChild(groupCustom);
+        eqPresetSelect.value = PH_VAL;
+        eqDelBtn.style.display='none';
+        eqSaveBtn.style.display = 'inline-block';
+      }
       renderBands();
     }
     eqToggle.addEventListener('click', async ()=>{
@@ -262,24 +322,57 @@ function renderMediaList(mediaList) {
     });
     eqPresetSelect.addEventListener('change', async (e)=>{
       const name = e.target.value;
-      if (!name) return;
+      if (!name || name === PH_VAL) return; // 忽略占位
       await sendToTab(tab.id, {type:'gmcx-eq-apply-preset', name});
       // 重新获取当前状态
       const st = await sendToTab(tab.id, {type:'gmcx-eq-get-state'});
       if (st && st.ok) { eqGains = st.gains; renderBands(); }
       // 判断删除按钮是否显示（自定义）
       eqDelBtn.style.display = Array.from((e.target.querySelector('optgroup[label="自定义"]')||[]).children).some(o=>o.value===name) ? 'inline-block' : 'none';
+      // 选择了预设 -> 隐藏保存按钮
+      eqSaveBtn.style.display = 'none';
+      // 选择预设后，若占位项存在则移除
+      removeCustomPlaceholder();
     });
     eqSaveBtn.addEventListener('click', async ()=>{
-      const name = eqSaveName.value.trim();
+      // 默认覆盖：若当前选择的是某个自定义预设且未输入新名称，则覆盖该名称
+      let name = eqSaveName.value.trim();
+      if (!name) {
+        const currentSel = eqPresetSelect.value;
+        // 判断当前是否为自定义预设
+        const isCustomSelected = (() => {
+          const customGroup = eqPresetSelect.querySelector('optgroup[label="自定义"]');
+          return !!(customGroup && Array.from(customGroup.children).some(o => o.value === currentSel));
+        })();
+        if (isCustomSelected && currentSel && currentSel !== '__current_custom__') {
+          name = currentSel; // 覆盖当前自定义预设
+        }
+      }
       const st = await sendToTab(tab.id,{type:'gmcx-eq-save-preset', name});
-      if (st && st.ok) { await loadEQ(); eqPresetSelect.value = st.name; eqDelBtn.style.display='inline-block'; }
+      if (st && st.ok) {
+        await loadEQ();
+        // 保存成功后匹配到该自定义预设，移除占位项（若存在）
+        removeCustomPlaceholder();
+        eqPresetSelect.value = st.name;
+        eqDelBtn.style.display='inline-block';
+        eqSaveBtn.style.display='none';
+      }
     });
     eqDelBtn.addEventListener('click', async ()=>{
       const name = eqPresetSelect.value; if (!name) return;
       await sendToTab(tab.id,{type:'gmcx-eq-delete-preset', name});
+      // 删除后切回“原始”音效
+      await sendToTab(tab.id, { type: 'gmcx-eq-apply-preset', name: '原始' });
       await loadEQ();
+      eqPresetSelect.value = '原始';
     });
+    if (eqResetBtn) {
+      eqResetBtn.addEventListener('click', async ()=>{
+        await sendToTab(tab.id, { type: 'gmcx-eq-reset' });
+        // 重载当前状态以同步滑块和选择状态
+        await loadEQ();
+      });
+    }
     // 倍速选择
     const speedSelect = card.querySelector('.media-speed');
     const speedCustom = card.querySelector('.media-speed-custom');

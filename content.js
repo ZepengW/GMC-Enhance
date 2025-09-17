@@ -26,15 +26,42 @@
     freqs: [60,170,400,1000,2500,6000,15000],
     ranges: { min: -24, max: 24 },
     builtinPresets: [
-      { name: 'Flat', gains: [0,0,0,0,0,0,0] },
-      { name: 'Bass Boost', gains: [8,6,4,1,0,-2,-4] },
-      { name: 'Vocal', gains: [-2,0,2,4,3,1,0] },
-      { name: 'Treble Boost', gains: [-4,-2,0,1,2,4,6] },
-      { name: 'Cinema', gains: [6,4,2,0,1,3,5] }
+      { name: '原始', gains: [0,0,0,0,0,0,0] },
+      { name: '低音增强', gains: [8,6,4,1,0,-2,-4] },
+      { name: '人声增强', gains: [-2,0,2,4,3,1,0] },
+      { name: '高音增强', gains: [-4,-2,0,1,2,4,6] },
+      { name: '影院', gains: [6,4,2,0,1,3,5] }
     ],
     customPresets: [],
     loadedCustom: false
   };
+  // ====== EQ 记忆（按页面） ======
+  const EQMEM = { applied: false };
+  function normalizePageKey() {
+    try {
+      const u = new URL(window.location.href);
+      // 忽略查询与锚点，按 origin+pathname 记忆
+      return `${u.origin}${u.pathname}`;
+    } catch { return window.location.origin + window.location.pathname; }
+  }
+  function getEQMemKey() { return 'eqMem:' + normalizePageKey(); }
+  function saveEQForPage(gains) {
+    if (!Array.isArray(gains) || gains.length !== EQ.freqs.length) return;
+    const key = getEQMemKey();
+    try { chrome.storage.local.set({ [key]: { gains, ts: Date.now() } }); } catch {}
+  }
+  function loadEQForPage(cb) {
+    const key = getEQMemKey();
+    try {
+      chrome.storage.local.get([key], (obj) => {
+        cb && cb(obj && obj[key] && Array.isArray(obj[key].gains) ? obj[key].gains : null);
+      });
+    } catch { cb && cb(null); }
+  }
+  function clearEQForPage(cb) {
+    const key = getEQMemKey();
+    try { chrome.storage.local.remove([key], () => cb && cb()); } catch { cb && cb(); }
+  }
   function ensureEQContext() {
     if (!EQ.ctx) {
       try { EQ.ctx = new (window.AudioContext || window.webkitAudioContext)(); }
@@ -75,6 +102,24 @@
     });
     return true;
   }
+  // 尝试在页面加载后自动应用已记忆的 EQ 设置
+  (function autoApplySavedEQ() {
+    let tries = 0, timer = null;
+    const loop = () => {
+      if (EQMEM.applied) { if (timer) clearInterval(timer); return; }
+      if (tries++ > 20) { if (timer) clearInterval(timer); return; } // 最长尝试 ~20 次
+      loadEQForPage((gains) => {
+        if (!gains) return; // 没有记忆
+        const media = getActiveMedia();
+        if (!media) return; // 还未检测到媒体
+        if (applyGains(media, gains)) {
+          EQMEM.applied = true;
+        }
+      });
+    };
+    // 初始延时后再开始轮询，给页面媒体一些加载时间
+    setTimeout(() => { loop(); timer = setInterval(loop, 800); }, 600);
+  })();
   function loadCustomPresets(cb) {
     if (EQ.loadedCustom) { cb && cb(); return; }
     chrome.storage.sync.get({ eqCustomPresets: [] }, (cfg) => {
@@ -682,6 +727,9 @@
       if (typeof index === 'number' && entry.filters[index]) {
         const v = Math.max(EQ.ranges.min, Math.min(EQ.ranges.max, Number(value)));
         entry.filters[index].gain.value = v;
+        // 保存当前整套增益为该页面记忆
+        const gainsNow = entry.filters.map(f => f.gain.value);
+        saveEQForPage(gainsNow);
       }
       sendResponse({ok:true});
       return;
@@ -694,8 +742,26 @@
         const preset = [...EQ.builtinPresets, ...EQ.customPresets].find(p => p.name === name);
         if (!preset) { sendResponse({ok:false}); return; }
         applyGains(media, preset.gains);
+        // 记忆所选预设对应的增益
+        saveEQForPage(preset.gains);
         sendResponse({ok:true});
       });
+      return true;
+    }
+    if (msg?.type === 'gmcx-eq-reset') {
+      const media = getActiveMedia();
+      if (!media) { sendResponse({ok:false}); return; }
+      const zero = EQ.freqs.map(()=>0);
+      if (applyGains(media, zero)) {
+        saveEQForPage(zero);
+        sendResponse({ok:true});
+      } else {
+        sendResponse({ok:false});
+      }
+      return;
+    }
+    if (msg?.type === 'gmcx-eq-clear-page') {
+      clearEQForPage(() => sendResponse({ok:true}));
       return true;
     }
     if (msg?.type === 'gmcx-eq-save-preset') {

@@ -108,3 +108,7 @@ GMC-Enhance 请求其功能所需的最低权限：
 - `activeTab`：在用户调用扩展 UI 时与当前标签页交互，并捕获可见标签页的屏幕截图。
 - `tabs`：需要枚举标签页并向其发送消息以获取媒体信息/控制。
 - `storage`：保存偏好设置，如快进/速度步长、均衡器预设和音量步长。
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=ZepengW/GMC-Enhance&type=Timeline)](https://www.star-history.com/#ZepengW/GMC-Enhance&Timeline)

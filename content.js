@@ -143,16 +143,35 @@
   function collectVideos() {
     const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
     const viewportMid = viewportHeight / 2;
-    const isVisible = (el) => {
+    const MIN_VW = 160, MIN_VH = 120; // 更接近官方 GMC 的可视阈值
+    const isVisibleEnough = (el) => {
       const rect = el.getBoundingClientRect();
-      return rect.width > 60 && rect.height > 60 && rect.bottom > 0 && rect.top < viewportHeight;
+      return rect.width > MIN_VW && rect.height > MIN_VH && rect.bottom > 0 && rect.top < viewportHeight;
     };
-    const medias = Array.from(document.querySelectorAll('video, audio')).filter(isVisible).filter(el => {
+    const isMiniPreview = (el) => {
+      if (!(el instanceof HTMLVideoElement)) return false;
+      const rect = el.getBoundingClientRect();
+      const smallByClient = rect.width < 240 || rect.height < 180;
+      const smallByVideo = (el.videoWidth || 0) < 240 || (el.videoHeight || 0) < 180;
+      const tiny = rect.width < 160 || rect.height < 120 || (el.videoWidth || 0) < 160 || (el.videoHeight || 0) < 120;
+      const mutedPreview = (el.muted || el.volume === 0);
+      const coldStart = (el.currentTime || 0) < 3;
+      // 小窗 + 静音 + 初始/预览状态 → 视为主页推荐/小窗预览，排除
+      return (tiny || smallByClient || smallByVideo) && mutedPreview && coldStart;
+    };
+    const isCandidateMedia = (el) => {
       if (!(el instanceof HTMLMediaElement)) return false;
-      if (el.readyState < 1) return false;
       if (el.ended) return false;
+      // 需要有部分数据（更严格，避免空白/壳元素）
+      if (el.readyState < 2) return false; // HAVE_CURRENT_DATA
+      if (el instanceof HTMLVideoElement) {
+        if (isMiniPreview(el)) return false;
+      }
       return true;
-    });
+    };
+    const medias = Array.from(document.querySelectorAll('video, audio'))
+      .filter(isVisibleEnough)
+      .filter(isCandidateMedia);
     // 排序策略：
     // 1. 正在播放的优先 (paused=false)
     // 2. 与视口中线距离更小
@@ -243,39 +262,9 @@
   function getActiveMedia() {
     const selected = resolveSelectedMedia();
     if (selected) return selected;
-    // 回退原逻辑（保持兼容）
-    const isVisible = (el) => {
-      const rect = el.getBoundingClientRect();
-      return rect.width > 60 && rect.height > 60 && !!(el.offsetParent || rect.top >= 0);
-    };
-    // 过滤掉典型预览视频和无效视频
-    const isValidMedia = (el) => {
-      if (!(el instanceof HTMLVideoElement || el instanceof HTMLAudioElement)) return false;
-      // src 为空或 blob:about:blank
-      // if (!el.src || el.src === 'about:blank' || el.src.startsWith('blob:')) return false;
-      // readyState < 2 表示未加载
-      if (el.readyState < 2) return false;
-      // 已播放结束
-      if (el.ended) return false;
-      // 页面非活跃时不显示（可选）
-      // if (document.visibilityState && document.visibilityState !== 'visible') return false;
-      // 典型预览视频
-      if (el instanceof HTMLVideoElement) {
-        const ct = el.currentTime || 0;
-        const isMuted = el.muted || el.volume === 0;
-        const isPaused = el.paused;
-        const small = el.videoWidth < 120 || el.videoHeight < 90 || el.clientWidth < 120 || el.clientHeight < 90;
-        if (isMuted && isPaused && ct < 1.5 && small) return false;
-      }
-      return true;
-    };
-    let videos = Array.from(document.querySelectorAll('video')).filter(isVisible).filter(isValidMedia);
-    if (videos.length) {
-      videos.sort((a,b) => (b.clientWidth*b.clientHeight) - (a.clientWidth*a.clientHeight));
-      return videos[0];
-    }
-    const audios = Array.from(document.querySelectorAll('audio')).filter(isVisible).filter(isValidMedia);
-    return audios[0] || null;
+    // 更严格的回退：与 collectVideos 同一套筛选
+    const list = collectVideos();
+    return list[0] || null;
   }
   function ensureHud() {
     if (STATE.hudEl) return STATE.hudEl;
@@ -861,6 +850,7 @@
       const blacklist = [
         // 规避主页打开视频，主页不关闭，显示两个视频卡片的问题
         'https://www.bilibili.com/',
+        'https://www.douyu.com/',
         // 可继续添加其他页面
       ];
       if (blacklist.includes(window.location.href)) {
@@ -872,7 +862,9 @@
         sendResponse({ ok: false });
         return;
       }
-      const media = getActiveMedia();
+      // 使用更严格的候选集合，选择优先播放中的媒体
+      const candidates = collectVideos();
+      const media = candidates[0] || null;
       if (!media) {
         sendResponse({ ok: false });
         return;
@@ -880,10 +872,8 @@
       // 再次过滤典型预览视频，防止误报
       if (
         media instanceof HTMLVideoElement &&
-        (media.muted || media.volume === 0) &&
-        media.paused &&
-        (media.currentTime || 0) < 1.5 &&
-        (media.videoWidth < 120 || media.videoHeight < 90 || media.clientWidth < 120 || media.clientHeight < 90)
+        ((media.muted || media.volume === 0) && (media.currentTime || 0) < 3) &&
+        (media.videoWidth < 240 || media.videoHeight < 180 || media.clientWidth < 240 || media.clientHeight < 180)
       ) {
         sendResponse({ ok: false });
         return;

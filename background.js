@@ -31,6 +31,9 @@ const GLOBAL_MEDIA = {
   forceGlobal: false, // 在用户使用 cycle-video 后强制使用全局控制；未 force 时默认聚焦当前活动标签媒体
   volumeStep: 0.05
 };
+// 最近是否由 chrome.commands 触发，避免与内容脚本回退重复处理
+let LAST_COMMAND_TS = 0;
+const COMMAND_SUPPRESS_MS = 300;
 
 // ===== 动态着色图标（代码渲染为红色） =====
 const ICON_TINT_CACHE = {
@@ -557,6 +560,7 @@ async function getActiveTab() {
   return tab;
 }
 chrome.commands.onCommand.addListener(async (command) => {
+  LAST_COMMAND_TS = Date.now();
   const tab = await getActiveTab();
   if (!tab || !tab.id) return;
   // 统一逻辑：所有命令先刷新媒体列表，再根据 forceGlobal / 当前活动页自动聚焦，使用同一套 A 覆盖层
@@ -575,6 +579,31 @@ chrome.commands.onCommand.addListener(async (command) => {
   }
 });
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg?.type === 'gmcx-command') {
+    // 若刚刚由 chrome.commands 触发过，则忽略内容脚本的回退请求，防止重复执行
+    if (Date.now() - LAST_COMMAND_TS < COMMAND_SUPPRESS_MS) { sendResponse && sendResponse({ ok: false, suppressed: true }); return; }
+    (async () => {
+      const tab = await getActiveTab();
+      if (!tab || !tab.id) { sendResponse && sendResponse({ ok: false }); return; }
+      const command = msg.command;
+      if (command === 'cycle-video') {
+        await scanMediaAcrossTabs(true);
+        await cycleGlobalSelection();
+        sendResponse && sendResponse({ ok: true });
+        return;
+      }
+      if (['seek-forward','seek-back','toggle-play-pause'].includes(command)) {
+        await scanMediaAcrossTabs();
+        await ensureActiveSelection(tab.id);
+        if (GLOBAL_MEDIA.selectedIndex < 0) { sendResponse && sendResponse({ ok: false }); return; }
+        if (command === 'toggle-play-pause') { await togglePlayGlobal(); sendResponse && sendResponse({ ok: true }); return; }
+        if (command === 'seek-forward') { await accumulateSeek(+5); sendResponse && sendResponse({ ok: true }); return; }
+        if (command === 'seek-back') { await accumulateSeek(-5); sendResponse && sendResponse({ ok: true }); return; }
+      }
+      sendResponse && sendResponse({ ok: false });
+    })();
+    return true; // async
+  }
   if (msg?.type === 'gmcx-eq-modified-state') {
     const tabId = sender?.tab?.id;
     if (tabId) setActionIconModified(tabId, !!msg.modified);

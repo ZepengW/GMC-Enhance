@@ -16,7 +16,7 @@
     lastMediaWeak: null,
     fineOverlayEl: null,
     overlayHideTimer: null,
-    overlayHideDelay: 5000 // 毫秒
+    overlayHideDelay: 3000 // 毫秒
     , lastMediaScanTs: 0
   };
   // ====== EQ 状态 ======
@@ -522,15 +522,29 @@
     const t = e.target, editable = t && (t.isContentEditable || ['INPUT','TEXTAREA','SELECT'].includes(t.tagName));
     if (editable) return;
     if (e.altKey && e.shiftKey) {
+      let handled = false;
       switch (e.code) {
-        case 'KeyK':       togglePlay(); e.preventDefault(); break;
-        case 'KeyL':       seekBy(STATE.seekStep); e.preventDefault(); break;
-        case 'KeyJ':       seekBy(-STATE.seekStep); e.preventDefault(); break;
+        // 将 V/J/K/L 转发给后台统一处理（即使 chrome.commands 不可用也可工作）
+        case 'KeyV': {
+          try { chrome.runtime.sendMessage({ type: 'gmcx-command', command: 'cycle-video' }); } catch {}
+          handled = true; e.preventDefault(); break; }
+        case 'KeyJ': {
+          try { chrome.runtime.sendMessage({ type: 'gmcx-command', command: 'seek-back' }); } catch {}
+          handled = true; e.preventDefault(); break; }
+        case 'KeyK': {
+          try { chrome.runtime.sendMessage({ type: 'gmcx-command', command: 'toggle-play-pause' }); } catch {}
+          handled = true; e.preventDefault(); break; }
+        case 'KeyL': {
+          try { chrome.runtime.sendMessage({ type: 'gmcx-command', command: 'seek-forward' }); } catch {}
+          handled = true; e.preventDefault(); break; }
+        // 其他按键保留原处理
         case 'Comma': { // Alt+Shift+< 音量降低
-          chrome.runtime.sendMessage({type:'gmcx-global-volume', action:'down'}); e.preventDefault(); break; }
+          chrome.runtime.sendMessage({type:'gmcx-global-volume', action:'down'});
+          handled = true; e.preventDefault(); break; }
         case 'Period': { // Alt+Shift+> 音量增加
-          chrome.runtime.sendMessage({type:'gmcx-global-volume', action:'up'}); e.preventDefault(); break; }
-        case 'KeyM': { // 静音/取消静音
+          chrome.runtime.sendMessage({type:'gmcx-global-volume', action:'up'});
+          handled = true; e.preventDefault(); break; }
+        case 'KeyM': { // 静音/取消静音（后台会基于全局/当前活动自动定位）
           try {
             chrome.runtime.sendMessage({ type: 'gmcx-toggle-mute' }, (resp) => {
               if (!resp || !resp.ok) {
@@ -548,25 +562,29 @@
               updateLocalOverlay({actionLabel: media.muted ? '静音' : '取消静音'});
             }
           }
-          e.preventDefault();
-          break;
+          handled = true; e.preventDefault(); break;
         }
         case 'KeyU': { // 全局加速
-          chrome.runtime.sendMessage({type:'gmcx-global-speed', action:'up'}); e.preventDefault(); break; }
+          chrome.runtime.sendMessage({type:'gmcx-global-speed', action:'up'});
+          handled = true; e.preventDefault(); break; }
         case 'KeyO': { // 全局减速
-          chrome.runtime.sendMessage({type:'gmcx-global-speed', action:'down'}); e.preventDefault(); break; }
+          chrome.runtime.sendMessage({type:'gmcx-global-speed', action:'down'});
+          handled = true; e.preventDefault(); break; }
         case 'KeyI': { // 重置 1x
-          chrome.runtime.sendMessage({type:'gmcx-global-speed', action:'reset'}); e.preventDefault(); break; }
+          chrome.runtime.sendMessage({type:'gmcx-global-speed', action:'reset'});
+          handled = true; e.preventDefault(); break; }
         case 'KeyP': { // 循环预设
-          chrome.runtime.sendMessage({type:'gmcx-global-speed', action:'cycle'}); e.preventDefault(); break; }
-        case 'KeyS':       screenshotVideo(); e.preventDefault(); break;
-        case 'KeyV': { // 切换视频
-          cycleSelectedMedia();
-          e.preventDefault();
-          break; }
+          chrome.runtime.sendMessage({type:'gmcx-global-speed', action:'cycle'});
+          handled = true; e.preventDefault(); break; }
+        case 'KeyS': { // 截图（本地行为，不影响全局）
+          screenshotVideo();
+          handled = true; e.preventDefault(); break; }
+        default:
+          // 其余 Alt+Shift 组合不在内容脚本处理，交给浏览器命令（如 V/J/K/L）
+          break;
       }
-      // 阻止事件继续冒泡到页面脚本，确保永远触发我们的覆盖层
-      e.stopImmediatePropagation();
+      // 仅当确实由我们处理时，才阻止事件冒泡，避免影响 chrome.commands
+      if (handled) e.stopImmediatePropagation();
     }
   }, true);
 

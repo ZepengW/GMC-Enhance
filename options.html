@@ -1,15 +1,22 @@
 <!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>GMC-Enhance 选项</title>
-<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:24px}.card{max-width:560px;background:#fff;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.08);padding:20px}label{display:block;margin:12px 0 6px;color:#333}input{width:100%;padding:10px 12px;border-radius:10px;border:1px solid #ddd}small{color:#666}button{margin-top:16px;padding:10px 14px;border:0;background:#1a73e8;color:#fff;border-radius:10px;cursor:pointer}.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}h1{font-size:20px;margin:0 0 16px}ul{line-height:1.8}code{background:#f5f5f7;padding:2px 6px;border-radius:6px}</style>
+<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:24px}.card{max-width:620px;background:#fff;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.08);padding:20px}label{display:block;margin:12px 0 6px;color:#333}input{width:100%;padding:10px 12px;border-radius:10px;border:1px solid #ddd}small{color:#666}button{margin-top:16px;padding:10px 14px;border:0;background:#1a73e8;color:#fff;border-radius:10px;cursor:pointer}.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}h1{font-size:20px;margin:0 0 16px}ul{line-height:1.8}code{background:#f5f5f7;padding:2px 6px;border-radius:6px}</style>
 </head><body><div class="card"><h1>GMC-Enhance 设置</h1><div class="row">
-<div><label>快进/快退步长（秒）</label><input id="seekStep" type="number" min="1" step="1" value="5"><small>Alt+Shift+← / → / J / L</small></div>
-<div><label>倍速步长（±）</label><input id="speedStep" type="number" min="0.05" step="0.05" value="0.25"><small>Alt+Shift+↑ / ↓ / U / I，Alt+Shift+O 重置</small></div>
+<div><label>快进/快退步长（秒）</label><input id="seekStep" type="number" min="1" step="1" value="5"><small>适用于快捷键 J / L（Alt+Shift+J / Alt+Shift+L）</small></div>
+<div><label>倍速步长（±）</label><input id="speedStep" type="number" min="0.05" step="0.05" value="0.25"><small>适用于快捷键 U / I（Alt+Shift+U / Alt+Shift+I）；Alt+Shift+O 重置</small></div>
+</div>
+<div class="row">
+<div><label>音量步长（0-1）</label><input id="volumeStep" type="number" min="0.01" max="0.5" step="0.01" value="0.05"><small>适用于快捷键 < / >（Alt+Shift+< / Alt+Shift+>）</small></div>
+<div></div>
 </div><button id="save">保存</button>
-<p><small>可到 <code>chrome://extensions/shortcuts</code> 修改全局快捷键。</small></p>
+<p><small>说明：本扩展已内置快捷键监听与跨标签控制，无需依赖 Chrome 全局快捷键设置。</small></p>
 <h3>默认快捷键</h3><ul>
-<li><b>播放/暂停</b>：Alt+Shift+K</li>
-<li><b>快退/快进</b>：Alt+Shift+J / Alt+Shift+L 或 Alt+Shift+← / →</li>
-<li><b>减速/加速</b>：Alt+Shift+U / Alt+Shift+I 或 Alt+Shift+↓ / ↑</li>
+<li><b>切换控制视频</b>：Alt+Shift+V（在各标签视频间循环选择）</li>
+<li><b>播放/暂停</b>：Alt+Shift+K（作用于当前选中视频）</li>
+<li><b>快退/快进</b>：Alt+Shift+J / Alt+Shift+L（步长见上方设置）</li>
+<li><b>减速/加速</b>：Alt+Shift+U / Alt+Shift+I（步长见上方设置）</li>
 <li><b>重置倍速</b>：Alt+Shift+O</li>
+<li><b>音量- / 音量+</b>：Alt+Shift+< / Alt+Shift+>（步长见上方设置）</li>
+<li><b>静音/恢复</b>：Alt+Shift+M</li>
 <li><b>截图</b>：Alt+Shift+S</li>
 </ul></div><script src="options.js"></script></body></html>

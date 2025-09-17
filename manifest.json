@@ -34,29 +34,29 @@
     }
   ],
   "commands": {
-    "toggle-play-pause": {
-      "suggested_key": {
-        "default": "Alt+Shift+K"
-      },
-      "description": "播放/暂停"
-    },
-    "seek-forward": {
-      "suggested_key": {
-        "default": "Alt+Shift+L"
-      },
-      "description": "快进（默认 +5s）"
-    },
-    "seek-back": {
-      "suggested_key": {
-        "default": "Alt+Shift+J"
-      },
-      "description": "快退（默认 -5s）"
-    },
-    "cycle-video": {
-      "suggested_key": {
-        "default": "Alt+Shift+V"
-      },
-      "description": "切换当前控制的视频"
-    }
+    // "toggle-play-pause": {
+    //   "suggested_key": {
+    //     "default": "Alt+Shift+K"
+    //   },
+    //   "description": "播放/暂停"
+    // },
+    // "seek-forward": {
+    //   "suggested_key": {
+    //     "default": "Alt+Shift+L"
+    //   },
+    //   "description": "快进（默认 +5s）"
+    // },
+    // "seek-back": {
+    //   "suggested_key": {
+    //     "default": "Alt+Shift+J"
+    //   },
+    //   "description": "快退（默认 -5s）"
+    // },
+    // "cycle-video": {
+    //   "suggested_key": {
+    //     "default": "Alt+Shift+V"
+    //   },
+    //   "description": "切换当前控制的视频"
+    // }
   }
 }

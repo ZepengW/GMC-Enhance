@@ -578,338 +578,137 @@
   }, true);
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    // 新增：支持 popup.js 控制消息
+    // 最近渲染的全局覆盖层序号，防止旧消息覆盖新状态
+    if (typeof STATE.lastOverlaySeq !== 'number') STATE.lastOverlaySeq = 0;
+    // 1) popup/其他来源的统一命令（仅用于当前页面本地控制）
     if (msg?.type === 'gmcx-command') {
-      if (msg.command === 'cycle-video') {
-        cycleSelectedMedia();
-        sendResponse?.({ ok: true });
-        return true;
-      }
-      if (msg.command === 'toggle-play-pause') {
-        togglePlay();
-        sendResponse?.({ ok: true });
-        return true;
-      }
-      if (msg.command === 'seek-forward') {
-        seekBy(STATE.seekStep);
-        sendResponse?.({ ok: true });
-        return true;
-      }
-      if (msg.command === 'seek-back') {
-        seekBy(-STATE.seekStep);
-        sendResponse?.({ ok: true });
-        return true;
-      }
+      if (msg.command === 'cycle-video') { cycleSelectedMedia(); sendResponse?.({ ok: true }); return true; }
+      if (msg.command === 'toggle-play-pause') { togglePlay(); sendResponse?.({ ok: true }); return true; }
+      if (msg.command === 'seek-forward') { seekBy(STATE.seekStep); sendResponse?.({ ok: true }); return true; }
+      if (msg.command === 'seek-back') { seekBy(-STATE.seekStep); sendResponse?.({ ok: true }); return true; }
     }
-    if (msg?.type === 'gmcx-global-overlay') {
-      if (msg.action === 'update') {
-        const p = msg.payload || {};
-        const el = ensureFineOverlay();
-        el.wrap.style.opacity = '1';
-        // 重构布局：标题单独一行靠左显示，状态信息单独一行
-        while (el.center.firstChild) el.center.removeChild(el.center.firstChild);
-        el.center.style.display = 'flex';
-        el.center.style.flexDirection = 'column';
-        el.center.style.alignItems = 'stretch';
-        el.center.style.justifyContent = 'flex-start';
-        el.center.style.width = '100%';
-        // Title line
-        const titleLine = document.createElement('div');
-        titleLine.style.cssText = 'display:flex;align-items:center;gap:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600;font-size:12px;text-align:left;';
-        if (typeof p.paused === 'boolean') {
-          const icon = document.createElement('span');
-          icon.textContent = p.paused ? '▶️' : '⏸️';
-          icon.style.flex = 'none';
-          titleLine.appendChild(icon);
+    // 2) 后台统一全局覆盖层更新
+    if (msg?.type === 'gmcx-global-overlay' && msg.action === 'update') {
+      const p = msg.payload || {};
+      if (typeof p.seq === 'number' && p.seq < STATE.lastOverlaySeq) {
+        // 旧的消息，忽略，避免回退
+        return true;
+      }
+      if (typeof p.seq === 'number') STATE.lastOverlaySeq = p.seq;
+      // 对 seek 流程附加 opId 检查：仅渲染最近一次 seek 会话
+      if (typeof p.opId === 'number') {
+        if (typeof STATE.lastSeekOpId !== 'number') STATE.lastSeekOpId = -1;
+        if (p.mode === 'seek-preview') {
+          // 预览阶段提升 opId
+          if (p.opId < STATE.lastSeekOpId) return true; // 旧预览
+          STATE.lastSeekOpId = p.opId;
+        } else if (p.mode === 'final' || p.mode === 'sync') {
+          // 仅接受与当前 opId 相同或更大的提交/同步
+          if (p.opId < STATE.lastSeekOpId) return true;
+          STATE.lastSeekOpId = p.opId;
         }
-        const titleSpan = document.createElement('span');
-        let indexPrefix = '';
-        if (typeof p.index === 'number' && typeof p.total === 'number' && p.total > 0) {
-          indexPrefix = `[${p.index}/${p.total}] `;
-        } else {
-          try {
-            const current = resolveSelectedMedia();
-            const total = STATE.videosCache.length;
-            if (current && total) indexPrefix = `[${Math.min(STATE.selectedIndex + 1, total)}/${total}] `;
-          } catch {}
-        }
-        const baseTitle = p.title || '全局控制';
-        const fullTitle = indexPrefix + baseTitle;
-        titleSpan.textContent = fullTitle;
-        titleSpan.title = fullTitle;
-        titleSpan.style.cssText = 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;';
-        titleLine.appendChild(titleSpan);
-        el.center.appendChild(titleLine);
-        // Status line
-        const statusLine = document.createElement('div');
-        statusLine.style.cssText = 'margin-top:4px;display:flex;align-items:center;gap:14px;font-variant-numeric:tabular-nums;font-size:11px;opacity:.9;';
-        const rateSpan = document.createElement('span');
-        rateSpan.textContent = (typeof p.playbackRate === 'number' ? p.playbackRate.toFixed(2) : '1.00') + 'x';
-        const volSpan = document.createElement('span');
-        if (typeof p.volume === 'number') {
-          let volIcon = '🔊';
-          if (p.muted || p.volume === 0) volIcon = '🔇';
-          else if (p.volume < 0.33) volIcon = '🔈';
-          else if (p.volume < 0.66) volIcon = '🔉';
-          volSpan.textContent = `${volIcon} ${Math.round(p.volume*100)}%`;
-        } else if (p.muted) {
-          volSpan.textContent = '🔇';
-        } else {
-          volSpan.textContent = '—';
-        }
-        statusLine.appendChild(rateSpan);
-        statusLine.appendChild(volSpan);
-        el.center.appendChild(statusLine);
-        // Time & progress bar
-        const leftLabel = p.preview && typeof p.previewSeconds === 'number' ? formatTime(p.previewSeconds) : (p.currentTime || '--:--');
-        el.left.textContent = leftLabel;
-        el.right.textContent = p.duration || '--:--';
-        const percent = Math.max(0, Math.min(100, p.percent || 0));
-        el.barFill.style.width = percent.toFixed(3) + '%';
-        el.barFill.style.background = p.preview ? 'linear-gradient(90deg,#ffb347,#ffcc33)' : 'linear-gradient(90deg,#4facfe,#00f2fe)';
-        // Hide side preview placeholders to give full width
-        if (el.prev) { el.prev.textContent=''; el.prev.style.display='none'; }
-        if (el.next) { el.next.textContent=''; el.next.style.display='none'; }
-        resetOverlayAutoHide();
-        return true;
       }
-    }
-    if (msg?.type === 'gmcx-play-media') {
-      const media = getActiveMedia();
-      if (media && media.paused) media.play?.();
-      showOverlayForMedia(media, '播放');
-      sendResponse({ ok: true });
-      return;
-    }
-    if (msg?.type === 'gmcx-pause-media') {
-      const media = getActiveMedia();
-      if (media && !media.paused) media.pause?.();
-      showOverlayForMedia(media, '暂停');
-      sendResponse({ ok: true });
-      return;
-    }
-    if (msg?.type === 'gmcx-mute-media') {
-      const media = getActiveMedia();
-      if (media) { media.muted = true; if (!msg.silent) showOverlayForMedia(media, '静音'); }
-      sendResponse({ok:true});
-      return;
-    }
-    if (msg?.type === 'gmcx-unmute-media') {
-      const media = getActiveMedia();
-      if (media) { media.muted = false; if (!msg.silent) showOverlayForMedia(media, '取消静音'); }
-      sendResponse({ok:true});
-      return;
-    }
-    if (msg?.type === 'gmcx-set-media-volume') {
-      const media = getActiveMedia();
-      if (media) {
-        const vol = Math.min(1, Math.max(0, Number(msg.value)));
-        media.volume = vol;
-        if (vol > 0 && media.muted) media.muted = false;
-        if (!msg.silent) showOverlayForMedia(media, `音量 ${(vol*100).toFixed(0)}%`);
+      const el = ensureFineOverlay();
+      el.wrap.style.opacity = '1';
+      while (el.center.firstChild) el.center.removeChild(el.center.firstChild);
+      el.center.style.display = 'flex';
+      el.center.style.flexDirection = 'column';
+      el.center.style.alignItems = 'stretch';
+      el.center.style.justifyContent = 'flex-start';
+      el.center.style.width = '100%';
+      const titleLine = document.createElement('div');
+      titleLine.style.cssText = 'display:flex;align-items:center;gap:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600;font-size:12px;text-align:left;';
+      if (typeof p.paused === 'boolean') {
+        const icon = document.createElement('span');
+        icon.textContent = p.paused ? '▶️' : '⏸️';
+        icon.style.flex = 'none';
+        titleLine.appendChild(icon);
       }
-      sendResponse({ok:true});
-      return;
-    }
-    // ===== EQ 消息处理 =====
-    if (msg?.type === 'gmcx-eq-init') {
-      loadCustomPresets(() => {
-        const media = getActiveMedia();
-        if (!media) { sendResponse({ok:false}); return; }
-        ensureMediaEQ(media);
-        const gains = (EQ.sourceMap.get(media)?.filters || []).map(f => f.gain.value);
-        sendResponse({ok:true, freqs: EQ.freqs, gains, builtin: EQ.builtinPresets, custom: EQ.customPresets});
-      });
-      return true;
-    }
-    if (msg?.type === 'gmcx-eq-get-state') {
-      const media = getActiveMedia();
-      if (!media) { sendResponse({ok:false}); return; }
-      const entry = ensureMediaEQ(media);
-      const gains = entry ? entry.filters.map(f => f.gain.value) : EQ.freqs.map(()=>0);
-      sendResponse({ok:true, gains});
-        try {
-          const modified = gains.some(v => Math.abs(Number(v)||0) > 0.0001);
-          chrome.runtime.sendMessage({ type: 'gmcx-eq-modified-state', modified });
-        } catch {}
-      return;
-    }
-    if (msg?.type === 'gmcx-eq-set-band') {
-      const media = getActiveMedia();
-      if (!media) { sendResponse({ok:false}); return; }
-      const entry = ensureMediaEQ(media);
-      if (!entry) { sendResponse({ok:false}); return; }
-      const { index, value } = msg;
-      if (typeof index === 'number' && entry.filters[index]) {
-        const v = Math.max(EQ.ranges.min, Math.min(EQ.ranges.max, Number(value)));
-        entry.filters[index].gain.value = v;
-        // 保存当前整套增益为该页面记忆
-        const gainsNow = entry.filters.map(f => f.gain.value);
-        saveEQForPage(gainsNow);
-          try {
-            const modified = gainsNow.some(x => Math.abs(Number(x)||0) > 0.0001);
-            chrome.runtime.sendMessage({ type: 'gmcx-eq-modified-state', modified });
-          } catch {}
-      }
-      sendResponse({ok:true});
-      return;
-    }
-    if (msg?.type === 'gmcx-eq-apply-preset') {
-      const media = getActiveMedia();
-      if (!media) { sendResponse({ok:false}); return; }
-      const name = msg.name;
-      loadCustomPresets(() => {
-        const preset = [...EQ.builtinPresets, ...EQ.customPresets].find(p => p.name === name);
-        if (!preset) { sendResponse({ok:false}); return; }
-        applyGains(media, preset.gains);
-        // 记忆所选预设对应的增益
-        saveEQForPage(preset.gains);
-          try {
-            const modified = preset.gains.some(v => Math.abs(Number(v)||0) > 0.0001);
-            chrome.runtime.sendMessage({ type: 'gmcx-eq-modified-state', modified });
-          } catch {}
-        sendResponse({ok:true});
-      });
-      return true;
-    }
-    if (msg?.type === 'gmcx-eq-reset') {
-      const media = getActiveMedia();
-      if (!media) { sendResponse({ok:false}); return; }
-      const zero = EQ.freqs.map(()=>0);
-      if (applyGains(media, zero)) {
-        saveEQForPage(zero);
-          try { chrome.runtime.sendMessage({ type: 'gmcx-eq-modified-state', modified: false }); } catch {}
-        sendResponse({ok:true});
+      const titleSpan = document.createElement('span');
+      let indexPrefix = '';
+      if (typeof p.index === 'number' && typeof p.total === 'number' && p.total > 0) {
+        indexPrefix = `[${p.index}/${p.total}] `;
       } else {
-        sendResponse({ok:false});
+        try {
+          const current = resolveSelectedMedia();
+          const total = STATE.videosCache.length;
+          if (current && total) indexPrefix = `[${Math.min(STATE.selectedIndex + 1, total)}/${total}] `;
+        } catch {}
       }
-      return;
-    }
-    if (msg?.type === 'gmcx-eq-clear-page') {
-      clearEQForPage(() => sendResponse({ok:true}));
+      const baseTitle = p.title || '全局控制';
+      const fullTitle = indexPrefix + baseTitle;
+      titleSpan.textContent = fullTitle;
+      titleSpan.title = fullTitle;
+      titleSpan.style.cssText = 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;';
+      titleLine.appendChild(titleSpan);
+      el.center.appendChild(titleLine);
+      const statusLine = document.createElement('div');
+      statusLine.style.cssText = 'margin-top:4px;display:flex;align-items:center;gap:14px;font-variant-numeric:tabular-nums;font-size:11px;opacity:.9;';
+      const rateSpan = document.createElement('span');
+      rateSpan.textContent = (typeof p.playbackRate === 'number' ? p.playbackRate.toFixed(2) : '1.00') + 'x';
+      const volSpan = document.createElement('span');
+      if (typeof p.volume === 'number') {
+        let volIcon = '🔊';
+        if (p.muted || p.volume === 0) volIcon = '🔇';
+        else if (p.volume < 0.33) volIcon = '🔈';
+        else if (p.volume < 0.66) volIcon = '🔉';
+        volSpan.textContent = `${volIcon} ${Math.round(p.volume*100)}%`;
+      } else if (p.muted) {
+        volSpan.textContent = '🔇';
+      } else {
+        volSpan.textContent = '—';
+      }
+      statusLine.appendChild(rateSpan);
+      statusLine.appendChild(volSpan);
+      el.center.appendChild(statusLine);
+      const leftLabel = p.preview && typeof p.previewSeconds === 'number' ? formatTime(p.previewSeconds) : (p.currentTime || '--:--');
+      el.left.textContent = leftLabel;
+      el.right.textContent = p.duration || '--:--';
+      const percent = Math.max(0, Math.min(100, p.percent || 0));
+      el.barFill.style.width = percent.toFixed(3) + '%';
+      el.barFill.style.background = p.preview ? 'linear-gradient(90deg,#ffb347,#ffcc33)' : 'linear-gradient(90deg,#4facfe,#00f2fe)';
+      if (el.prev) { el.prev.textContent=''; el.prev.style.display='none'; }
+      if (el.next) { el.next.textContent=''; el.next.style.display='none'; }
+      resetOverlayAutoHide();
       return true;
     }
-    if (msg?.type === 'gmcx-eq-save-preset') {
-      const media = getActiveMedia();
-      if (!media) { sendResponse({ok:false}); return; }
-      const entry = ensureMediaEQ(media);
-      if (!entry) { sendResponse({ok:false}); return; }
-      const gains = entry.filters.map(f => f.gain.value);
-      loadCustomPresets(() => {
-        const name = String(msg.name || '').trim().slice(0,40) || ('Preset'+Date.now());
-        // 覆盖同名
-        const existIdx = EQ.customPresets.findIndex(p => p.name === name);
-        if (existIdx >= 0) EQ.customPresets[existIdx] = {name, gains};
-        else EQ.customPresets.push({name, gains});
-        saveCustomPresets();
-        sendResponse({ok:true, name});
-      });
-      return true;
-    }
-    if (msg?.type === 'gmcx-eq-delete-preset') {
-      loadCustomPresets(() => {
-        const name = msg.name;
-        const before = EQ.customPresets.length;
-        EQ.customPresets = EQ.customPresets.filter(p => p.name !== name);
-        if (EQ.customPresets.length !== before) saveCustomPresets();
-        sendResponse({ok:true});
-      });
-      return true;
-    }
-    if (msg?.type === 'gmcx-seek-media') {
-      const media = getActiveMedia();
-      if (media && isFinite(media.duration)) {
-        const delta = Number(msg.value) || 0;
-        media.currentTime = Math.max(0, Math.min(media.duration, media.currentTime + delta));
-        showOverlayForMedia(media, `${delta>=0? '快进':'快退'} ${Math.abs(delta)}s`);
-      }
-      sendResponse({ ok: true });
-      return;
-    }
-    if (msg?.type === 'gmcx-set-media-speed') {
-      const media = getActiveMedia();
-      if (media) {
-        media.playbackRate = Number(msg.value);
-        showOverlayForMedia(media, `速度 ${media.playbackRate.toFixed(2)}×`);
-      }
-      sendResponse({ ok: true });
-      return;
-    }
-    if (msg?.type === 'gmcx-reset-media') {
-      const media = getActiveMedia();
-      if (media) {
-        media.currentTime = 0;
-        media.playbackRate = 1.0;
-        showOverlayForMedia(media, '重置');
-      }
-      sendResponse({ ok: true });
-      return;
-    }
+    // 3) 本地媒体控制（支持 silent 抑制本地覆盖层，避免与全局覆盖层重叠）
+    if (msg?.type === 'gmcx-play-media') { const media = getActiveMedia(); if (media && media.paused) media.play?.(); if (!msg.silent) showOverlayForMedia(media, '播放'); sendResponse({ ok: true }); return; }
+    if (msg?.type === 'gmcx-pause-media') { const media = getActiveMedia(); if (media && !media.paused) media.pause?.(); if (!msg.silent) showOverlayForMedia(media, '暂停'); sendResponse({ ok: true }); return; }
+    if (msg?.type === 'gmcx-mute-media') { const media = getActiveMedia(); if (media) { media.muted = true; if (!msg.silent) showOverlayForMedia(media, '静音'); } sendResponse({ok:true}); return; }
+    if (msg?.type === 'gmcx-unmute-media') { const media = getActiveMedia(); if (media) { media.muted = false; if (!msg.silent) showOverlayForMedia(media, '取消静音'); } sendResponse({ok:true}); return; }
+    if (msg?.type === 'gmcx-set-media-volume') { const media = getActiveMedia(); if (media) { const vol = Math.min(1, Math.max(0, Number(msg.value))); media.volume = vol; if (vol > 0 && media.muted) media.muted = false; if (!msg.silent) showOverlayForMedia(media, `音量 ${(vol*100).toFixed(0)}%`);} sendResponse({ok:true}); return; }
+    if (msg?.type === 'gmcx-seek-media') { const media = getActiveMedia(); if (media && isFinite(media.duration)) { const delta = Number(msg.value) || 0; media.currentTime = Math.max(0, Math.min(media.duration, media.currentTime + delta)); if (!msg.silent) showOverlayForMedia(media, `${delta>=0? '快进':'快退'} ${Math.abs(delta)}s`);} sendResponse({ ok: true }); return; }
+    if (msg?.type === 'gmcx-set-media-speed') { const media = getActiveMedia(); if (media) { media.playbackRate = Number(msg.value); if (!msg.silent) showOverlayForMedia(media, `速度 ${media.playbackRate.toFixed(2)}×`);} sendResponse({ ok: true }); return; }
+    if (msg?.type === 'gmcx-reset-media') { const media = getActiveMedia(); if (media) { media.currentTime = 0; media.playbackRate = 1.0; if (!msg.silent) showOverlayForMedia(media, '重置'); } sendResponse({ ok: true }); return; }
+    if (msg?.type === 'gmcx-set-media-currentTime') { const media = getActiveMedia(); if (media && isFinite(media.duration)) { const target = Math.max(0, Math.min(media.duration, Number(msg.value))); media.currentTime = target; if (!msg.silent) showOverlayForMedia(media, `跳转 ${formatTime(target)}`); } sendResponse({ ok: true }); return; }
+    // 4) EQ 消息处理
+    if (msg?.type === 'gmcx-eq-init') { loadCustomPresets(() => { const media = getActiveMedia(); if (!media) { sendResponse({ok:false}); return; } ensureMediaEQ(media); const gains = (EQ.sourceMap.get(media)?.filters || []).map(f => f.gain.value); sendResponse({ok:true, freqs: EQ.freqs, gains, builtin: EQ.builtinPresets, custom: EQ.customPresets}); }); return true; }
+    if (msg?.type === 'gmcx-eq-get-state') { const media = getActiveMedia(); if (!media) { sendResponse({ok:false}); return; } const entry = ensureMediaEQ(media); const gains = entry ? entry.filters.map(f => f.gain.value) : EQ.freqs.map(()=>0); sendResponse({ok:true, gains}); try { const modified = gains.some(v => Math.abs(Number(v)||0) > 0.0001); chrome.runtime.sendMessage({ type: 'gmcx-eq-modified-state', modified }); } catch {} return; }
+    if (msg?.type === 'gmcx-eq-set-band') { const media = getActiveMedia(); if (!media) { sendResponse({ok:false}); return; } const entry = ensureMediaEQ(media); if (!entry) { sendResponse({ok:false}); return; } const { index, value } = msg; if (typeof index === 'number' && entry.filters[index]) { const v = Math.max(EQ.ranges.min, Math.min(EQ.ranges.max, Number(value))); entry.filters[index].gain.value = v; const gainsNow = entry.filters.map(f => f.gain.value); saveEQForPage(gainsNow); try { const modified = gainsNow.some(x => Math.abs(Number(x)||0) > 0.0001); chrome.runtime.sendMessage({ type: 'gmcx-eq-modified-state', modified }); } catch {} } sendResponse({ok:true}); return; }
+    if (msg?.type === 'gmcx-eq-apply-preset') { const media = getActiveMedia(); if (!media) { sendResponse({ok:false}); return; } const name = msg.name; loadCustomPresets(() => { const preset = [...EQ.builtinPresets, ...EQ.customPresets].find(p => p.name === name); if (!preset) { sendResponse({ok:false}); return; } applyGains(media, preset.gains); saveEQForPage(preset.gains); try { const modified = preset.gains.some(v => Math.abs(Number(v)||0) > 0.0001); chrome.runtime.sendMessage({ type: 'gmcx-eq-modified-state', modified }); } catch {} sendResponse({ok:true}); }); return true; }
+    if (msg?.type === 'gmcx-eq-reset') { const media = getActiveMedia(); if (!media) { sendResponse({ok:false}); return; } const zero = EQ.freqs.map(()=>0); if (applyGains(media, zero)) { saveEQForPage(zero); try { chrome.runtime.sendMessage({ type: 'gmcx-eq-modified-state', modified: false }); } catch {} sendResponse({ok:true}); } else { sendResponse({ok:false}); } return; }
+    if (msg?.type === 'gmcx-eq-clear-page') { clearEQForPage(() => sendResponse({ok:true})); return true; }
+    if (msg?.type === 'gmcx-eq-save-preset') { const media = getActiveMedia(); if (!media) { sendResponse({ok:false}); return; } const entry = ensureMediaEQ(media); if (!entry) { sendResponse({ok:false}); return; } const gains = entry.filters.map(f => f.gain.value); loadCustomPresets(() => { const name = String(msg.name || '').trim().slice(0,40) || ('Preset'+Date.now()); const existIdx = EQ.customPresets.findIndex(p => p.name === name); if (existIdx >= 0) EQ.customPresets[existIdx] = {name, gains}; else EQ.customPresets.push({name, gains}); saveCustomPresets(); sendResponse({ok:true, name}); }); return true; }
+    if (msg?.type === 'gmcx-eq-delete-preset') { loadCustomPresets(() => { const name = msg.name; const before = EQ.customPresets.length; EQ.customPresets = EQ.customPresets.filter(p => p.name !== name); if (EQ.customPresets.length !== before) saveCustomPresets(); sendResponse({ok:true}); }); return true; }
+    // 5) 全局媒体探测（供后台扫描使用）
     if (msg?.type === 'gmcx-get-media-info') {
-      // 黑名单页面过滤（严格匹配）
-      const blacklist = [
-        // 规避主页打开视频，主页不关闭，显示两个视频卡片的问题
-        'https://www.bilibili.com/',
-        'https://www.douyu.com/',
-        // 可继续添加其他页面
-      ];
-      if (blacklist.includes(window.location.href)) {
-        sendResponse({ ok: false });
-        return;
-      }
-      // 仅顶层页面返回媒体信息，避免 iframe 重复
-      if (window.top !== window.self) {
-        sendResponse({ ok: false });
-        return;
-      }
-      // 使用更严格的候选集合，选择优先播放中的媒体
+      const blacklist = ['https://www.bilibili.com/','https://www.douyu.com/'];
+      if (blacklist.includes(window.location.href)) { sendResponse({ ok: false }); return; }
+      if (window.top !== window.self) { sendResponse({ ok: false }); return; }
       const candidates = collectVideos();
       const media = candidates[0] || null;
-      if (!media) {
-        sendResponse({ ok: false });
-        return;
-      }
-      // 再次过滤典型预览视频，防止误报
-      if (
-        media instanceof HTMLVideoElement &&
-        ((media.muted || media.volume === 0) && (media.currentTime || 0) < 3) &&
-        (media.videoWidth < 240 || media.videoHeight < 180 || media.clientWidth < 240 || media.clientHeight < 180)
-      ) {
-        sendResponse({ ok: false });
-        return;
+      if (!media) { sendResponse({ ok: false }); return; }
+      if (media instanceof HTMLVideoElement && ((media.muted || media.volume === 0) && (media.currentTime || 0) < 3) && (media.videoWidth < 240 || media.videoHeight < 180 || media.clientWidth < 240 || media.clientHeight < 180)) {
+        sendResponse({ ok: false }); return;
       }
       const type = media instanceof HTMLVideoElement ? 'video' : 'audio';
       const paused = !!media.paused;
       const currentTime = formatTime(media.currentTime);
       const duration = formatTime(media.duration);
-      // 获取视频 poster 作为缩略图
       let thumbnail = '';
-      if (type === 'video') {
-        thumbnail = media.poster || '';
-      }
-      sendResponse({
-        ok: true,
-        type,
-        paused,
-        currentTime,
-        duration,
-        rawCurrentTime: media.currentTime,
-        rawDuration: media.duration,
-        playbackRate: media.playbackRate,
-        thumbnail,
-        muted: media.muted,
-        volume: media.volume
-      });
-      return;
-    }
-    if (msg?.type === 'gmcx-set-media-currentTime') {
-      const media = getActiveMedia();
-      if (media && isFinite(media.duration)) {
-        const target = Math.max(0, Math.min(media.duration, Number(msg.value)));
-        media.currentTime = target;
-        showOverlayForMedia(media, `跳转 ${formatTime(target)}`);
-      }
-      sendResponse({ ok: true });
+      if (type === 'video') { thumbnail = media.poster || ''; }
+      sendResponse({ ok: true, type, paused, currentTime, duration, rawCurrentTime: media.currentTime, rawDuration: media.duration, playbackRate: media.playbackRate, thumbnail, muted: media.muted, volume: media.volume });
       return;
     }
   });

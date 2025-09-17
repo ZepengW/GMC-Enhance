@@ -25,11 +25,15 @@ const GLOBAL_MEDIA = {
   seekDebounce: 550,
   baseTime: null, // 最近一次实际 currentTime 基准
   pendingRefreshAfterSwitch: false,
+  seekStep: 5,
   speedStep: 0.25,
   speedPresets: [0.75, 1, 1.25, 1.5, 2],
   speedPresetIndex: 1,
   forceGlobal: false, // 在用户使用 cycle-video 后强制使用全局控制；未 force 时默认聚焦当前活动标签媒体
-  volumeStep: 0.05
+  volumeStep: 0.05,
+  overlaySeq: 0,
+  seekOpId: 0,
+  currentSeekOpId: 0
 };
 // 最近是否由 chrome.commands 触发，避免与内容脚本回退重复处理
 let LAST_COMMAND_TS = 0;
@@ -152,9 +156,11 @@ function sendToContent(tabId, msg) {
 }
 
 function overlayUpdateOnActive(payload) {
+  // 为每次覆盖层更新附加递增序号，防止旧消息覆盖新状态
+  const seq = ++GLOBAL_MEDIA.overlaySeq;
   chrome.tabs.query({active:true, currentWindow:true}, ([tab]) => {
     if (!tab) return;
-    sendToContent(tab.id, {type:'gmcx-global-overlay', action:'update', payload});
+    sendToContent(tab.id, {type:'gmcx-global-overlay', action:'update', payload: { ...payload, seq }});
   });
 }
 
@@ -258,7 +264,7 @@ async function cycleGlobalSelection() {
   GLOBAL_MEDIA.forceGlobal = true; // 用户显式切换后进入全局优先模式
 }
 
-async function ensureBaseTime() {
+async function ensureBaseTime(opId) {
   if (GLOBAL_MEDIA.baseTime != null) return;
   const entry = GLOBAL_MEDIA.mediaList[GLOBAL_MEDIA.selectedIndex];
   if (!entry) return;
@@ -278,7 +284,8 @@ async function ensureBaseTime() {
       preview: false,
       playbackRate: updated.playbackRate,
       volume: updated.volume,
-      muted: updated.muted
+      muted: updated.muted,
+      opId
     });
   }
 }
@@ -289,11 +296,23 @@ function scheduleSeekCommit() {
     if (!GLOBAL_MEDIA.seekAccumDelta) return;
     const entry = GLOBAL_MEDIA.mediaList[GLOBAL_MEDIA.selectedIndex];
     if (!entry) { GLOBAL_MEDIA.seekAccumDelta = 0; return; }
+    const opId = GLOBAL_MEDIA.currentSeekOpId;
     try {
-      await sendToTab(entry.tab.id, {type:'gmcx-seek-media', value: GLOBAL_MEDIA.seekAccumDelta});
+      await sendToTab(entry.tab.id, {type:'gmcx-seek-media', value: GLOBAL_MEDIA.seekAccumDelta, silent: true});
       const updated = await sendToTab(entry.tab.id, {type:'gmcx-get-media-info'});
       if (updated && updated.ok) {
         GLOBAL_MEDIA.baseTime = updated.rawCurrentTime;
+        // 提交后将媒体信息写回列表，减少下次使用陈旧 info 的概率
+        entry.info = {
+          paused: updated.paused,
+          duration: updated.duration,
+          currentTime: updated.currentTime,
+          rawCurrentTime: updated.rawCurrentTime,
+          rawDuration: updated.rawDuration,
+          playbackRate: updated.playbackRate,
+          volume: updated.volume,
+          muted: updated.muted
+        };
         overlayUpdateOnActive({
           mode:'final',
           index: GLOBAL_MEDIA.selectedIndex + 1,
@@ -306,7 +325,8 @@ function scheduleSeekCommit() {
           preview: false,
           playbackRate: updated.playbackRate,
           volume: updated.volume,
-          muted: updated.muted
+          muted: updated.muted,
+          opId
         });
       }
     } finally {
@@ -317,7 +337,37 @@ function scheduleSeekCommit() {
 
 async function accumulateSeek(delta) {
   if (GLOBAL_MEDIA.selectedIndex < 0) return;
-  await ensureBaseTime();
+  // 新的 seek 会话：当累计量为 0 时分配操作 ID
+  if (GLOBAL_MEDIA.seekAccumDelta === 0) {
+    GLOBAL_MEDIA.currentSeekOpId = ++GLOBAL_MEDIA.seekOpId;
+    // 强制刷新基准时间与缓存 info，避免使用过期基准
+    const entry0 = GLOBAL_MEDIA.mediaList[GLOBAL_MEDIA.selectedIndex];
+    if (entry0) {
+      try {
+        const latest = await sendToTab(entry0.tab.id, { type: 'gmcx-get-media-info' });
+        if (latest && latest.ok) {
+          GLOBAL_MEDIA.baseTime = latest.rawCurrentTime;
+          entry0.info = {
+            paused: latest.paused,
+            duration: latest.duration,
+            currentTime: latest.currentTime,
+            rawCurrentTime: latest.rawCurrentTime,
+            rawDuration: latest.rawDuration,
+            playbackRate: latest.playbackRate,
+            volume: latest.volume,
+            muted: latest.muted
+          };
+        } else {
+          // 情况不明，置空以便 ensureBaseTime 再次获取
+          GLOBAL_MEDIA.baseTime = null;
+        }
+      } catch {
+        GLOBAL_MEDIA.baseTime = null;
+      }
+    }
+  }
+  const opId = GLOBAL_MEDIA.currentSeekOpId;
+  await ensureBaseTime(opId);
   const entry = GLOBAL_MEDIA.mediaList[GLOBAL_MEDIA.selectedIndex];
   if (!entry) return;
   GLOBAL_MEDIA.seekAccumDelta += delta;
@@ -334,13 +384,14 @@ async function accumulateSeek(delta) {
     title: (tab.title || tab.url || '').slice(0,80),
     paused: info.paused,
     duration: info.duration,
-    currentTime: '--:--', // 预览阶段不格式化真实时间
+    currentTime: info.currentTime,
     previewSeconds: previewTime,
     percent,
     preview: true,
     playbackRate: info.playbackRate,
     volume: info.volume,
-    muted: info.muted
+    muted: info.muted,
+    opId
   });
   scheduleSeekCommit();
 }
@@ -351,7 +402,7 @@ async function togglePlayGlobal() {
   if (!entry) return;
   const state = await sendToTab(entry.tab.id, {type:'gmcx-get-media-info'});
   if (state && state.ok) {
-    if (state.paused) await sendToTab(entry.tab.id, {type:'gmcx-play-media'}); else await sendToTab(entry.tab.id, {type:'gmcx-pause-media'});
+    if (state.paused) await sendToTab(entry.tab.id, {type:'gmcx-play-media', silent: true}); else await sendToTab(entry.tab.id, {type:'gmcx-pause-media', silent: true});
     const after = await sendToTab(entry.tab.id, {type:'gmcx-get-media-info'});
     if (after && after.ok) {
       overlayUpdateOnActive({
@@ -406,7 +457,8 @@ async function applyPlaybackRate(rate) {
   if (GLOBAL_MEDIA.selectedIndex < 0) return;
   const entry = GLOBAL_MEDIA.mediaList[GLOBAL_MEDIA.selectedIndex];
   if (!entry) return;
-  await sendToTab(entry.tab.id, {type:'gmcx-set-media-speed', value: rate});
+    await sendToTab(entry.tab.id, {type:'gmcx-set-media-speed', value: rate, silent: true});
+  // 抑制本地覆盖层，统一使用全局覆盖层
   const after = await sendToTab(entry.tab.id, {type:'gmcx-get-media-info'});
   if (after && after.ok) {
     overlayUpdateOnActive({
@@ -432,7 +484,7 @@ async function applyVolume(vol) {
   vol = Math.min(1, Math.max(0, Number(vol)));
   const entry = GLOBAL_MEDIA.mediaList[GLOBAL_MEDIA.selectedIndex];
   if (!entry) return;
-  await sendToTab(entry.tab.id, {type:'gmcx-set-media-volume', value: vol, silent:true});
+  await sendToTab(entry.tab.id, {type:'gmcx-set-media-volume', value: vol, silent: true});
   const after = await sendToTab(entry.tab.id, {type:'gmcx-get-media-info'});
   if (after && after.ok) {
     overlayUpdateOnActive({
@@ -481,7 +533,9 @@ async function cyclePlaybackPreset() {
 }
 
 function loadSpeedSettings() {
-  chrome.storage.sync.get({ speedStep: 0.25, volumeStep: 0.05 }, (cfg) => {
+  chrome.storage.sync.get({ seekStep: 5, speedStep: 0.25, volumeStep: 0.05 }, (cfg) => {
+    const sstep = Number(cfg.seekStep);
+    if (sstep && sstep > 0) GLOBAL_MEDIA.seekStep = sstep;
     const step = Number(cfg.speedStep);
     if (step && step > 0) GLOBAL_MEDIA.speedStep = step;
     const vstep = Number(cfg.volumeStep);
@@ -497,6 +551,10 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'sync' && changes.volumeStep) {
     const nv = Number(changes.volumeStep.newValue);
     if (nv && nv > 0 && nv <= 0.5) GLOBAL_MEDIA.volumeStep = nv;
+  }
+  if (area === 'sync' && changes.seekStep) {
+    const nv = Number(changes.seekStep.newValue);
+    if (nv && nv > 0) GLOBAL_MEDIA.seekStep = nv;
   }
 });
 // ===== 根据页面存储的 EQ 记忆设置图标（无需依赖弹出页/点击） =====
@@ -574,8 +632,8 @@ chrome.commands.onCommand.addListener(async (command) => {
     await ensureActiveSelection(tab.id); // 在非全局模式下优先当前活动标签媒体
     if (GLOBAL_MEDIA.selectedIndex < 0) return; // 没有媒体则直接忽略
     if (command === 'toggle-play-pause') { await togglePlayGlobal(); return; }
-    if (command === 'seek-forward') { await accumulateSeek(+5); return; }
-    if (command === 'seek-back') { await accumulateSeek(-5); return; }
+    if (command === 'seek-forward') { await accumulateSeek(+GLOBAL_MEDIA.seekStep); return; }
+    if (command === 'seek-back') { await accumulateSeek(-GLOBAL_MEDIA.seekStep); return; }
   }
 });
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -597,8 +655,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         await ensureActiveSelection(tab.id);
         if (GLOBAL_MEDIA.selectedIndex < 0) { sendResponse && sendResponse({ ok: false }); return; }
         if (command === 'toggle-play-pause') { await togglePlayGlobal(); sendResponse && sendResponse({ ok: true }); return; }
-        if (command === 'seek-forward') { await accumulateSeek(+5); sendResponse && sendResponse({ ok: true }); return; }
-        if (command === 'seek-back') { await accumulateSeek(-5); sendResponse && sendResponse({ ok: true }); return; }
+        if (command === 'seek-forward') { await accumulateSeek(+GLOBAL_MEDIA.seekStep); sendResponse && sendResponse({ ok: true }); return; }
+        if (command === 'seek-back') { await accumulateSeek(-GLOBAL_MEDIA.seekStep); sendResponse && sendResponse({ ok: true }); return; }
       }
       sendResponse && sendResponse({ ok: false });
     })();
@@ -648,6 +706,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg?.type === 'gmcx-overlay-hidden') {
     // 覆盖层隐藏后恢复为本地优先模式
     GLOBAL_MEDIA.forceGlobal = false;
+    // 下次开始新的 seek 时强制重新同步基准
+    GLOBAL_MEDIA.baseTime = null;
     sendResponse && sendResponse({ok:true});
     return; // 不需要异步
   }

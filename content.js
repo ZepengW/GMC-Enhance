@@ -100,6 +100,11 @@
         f.gain.value = g;
       }
     });
+      // 通知后台当前页面 EQ 是否为非原始（有任一增益非0）
+      try {
+        const modified = Array.isArray(gains) && gains.some(v => Math.abs(Number(v)||0) > 0.0001);
+        chrome.runtime.sendMessage({ type: 'gmcx-eq-modified-state', modified });
+      } catch {}
     return true;
   }
   // 尝试在页面加载后自动应用已记忆的 EQ 设置
@@ -716,6 +721,10 @@
       const entry = ensureMediaEQ(media);
       const gains = entry ? entry.filters.map(f => f.gain.value) : EQ.freqs.map(()=>0);
       sendResponse({ok:true, gains});
+        try {
+          const modified = gains.some(v => Math.abs(Number(v)||0) > 0.0001);
+          chrome.runtime.sendMessage({ type: 'gmcx-eq-modified-state', modified });
+        } catch {}
       return;
     }
     if (msg?.type === 'gmcx-eq-set-band') {
@@ -730,6 +739,10 @@
         // 保存当前整套增益为该页面记忆
         const gainsNow = entry.filters.map(f => f.gain.value);
         saveEQForPage(gainsNow);
+          try {
+            const modified = gainsNow.some(x => Math.abs(Number(x)||0) > 0.0001);
+            chrome.runtime.sendMessage({ type: 'gmcx-eq-modified-state', modified });
+          } catch {}
       }
       sendResponse({ok:true});
       return;
@@ -744,6 +757,10 @@
         applyGains(media, preset.gains);
         // 记忆所选预设对应的增益
         saveEQForPage(preset.gains);
+          try {
+            const modified = preset.gains.some(v => Math.abs(Number(v)||0) > 0.0001);
+            chrome.runtime.sendMessage({ type: 'gmcx-eq-modified-state', modified });
+          } catch {}
         sendResponse({ok:true});
       });
       return true;
@@ -754,6 +771,7 @@
       const zero = EQ.freqs.map(()=>0);
       if (applyGains(media, zero)) {
         saveEQForPage(zero);
+          try { chrome.runtime.sendMessage({ type: 'gmcx-eq-modified-state', modified: false }); } catch {}
         sendResponse({ok:true});
       } else {
         sendResponse({ok:false});

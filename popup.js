@@ -65,7 +65,7 @@ function renderMediaList(mediaList) {
         thumbHtml = '';
       }
     }
-    // 控件区
+  // 控件区
     card.innerHTML = `
       <div class="media-header">
         ${thumbHtml}
@@ -114,6 +114,24 @@ function renderMediaList(mediaList) {
         </div>
       </div>
     `;
+    // 初始根据存储标记 EQ 修改状态（无需打开面板）
+    (function markEqModifiedBadge() {
+      try {
+        const url = tab.url || '';
+        const u = new URL(url);
+        const key = 'eqMem:' + u.origin + u.pathname;
+        chrome.storage.local.get([key], (obj) => {
+          const val = obj[key];
+          const gains = val && Array.isArray(val.gains) ? val.gains : null;
+          const modified = !!(gains && gains.some(v => Math.abs(Number(v)||0) > 0.0001));
+          const toggleBtn = card.querySelector('.media-eq-toggle');
+          if (toggleBtn) {
+            if (modified) toggleBtn.classList.add('eq-modified');
+            else toggleBtn.classList.remove('eq-modified');
+          }
+        });
+      } catch {}
+    })();
     // 控件事件
     // 播放/暂停
     card.querySelector('.media-play').addEventListener('click', async () => {
@@ -222,6 +240,13 @@ function renderMediaList(mediaList) {
     let eqCustom = [];
     const approxEqual = (a,b,eps=0.1) => Array.isArray(a) && Array.isArray(b) && a.length===b.length && a.every((v,i)=>Math.abs((+v)-(+b[i]))<=eps);
     const PH_VAL = '__current_custom__';
+    function setEqButtonTint(isModified) {
+      if (isModified) {
+        eqToggle.classList.add('eq-modified');
+      } else {
+        eqToggle.classList.remove('eq-modified');
+      }
+    }
     function ensureCustomPlaceholder() {
       let opt = eqPresetSelect.querySelector(`option[value="${PH_VAL}"]`);
       if (!opt) {
@@ -266,12 +291,14 @@ function renderMediaList(mediaList) {
             eqSaveBtn.style.display = 'none';
             // 有匹配则移除占位
             removeCustomPlaceholder();
+            setEqButtonTint(matched.name !== '原始');
           } else {
             // 无匹配则确保占位项存在并选中
             ensureCustomPlaceholder();
             eqPresetSelect.value = PH_VAL;
             eqDelBtn.style.display = 'none';
             eqSaveBtn.style.display = 'inline-block';
+            setEqButtonTint(true);
           }
         });
         col.appendChild(lab); col.appendChild(slider); col.appendChild(val);
@@ -302,6 +329,7 @@ function renderMediaList(mediaList) {
         const isCustom = resp.custom.some(p => p.name === matched.name);
         eqDelBtn.style.display = isCustom ? 'inline-block' : 'none';
         eqSaveBtn.style.display = 'none';
+        setEqButtonTint(matched.name !== '原始');
       } else {
         // 渲染占位项（显示为“自定义”），仅在不匹配时
         const placeholder = document.createElement('option');
@@ -313,6 +341,7 @@ function renderMediaList(mediaList) {
         eqPresetSelect.value = PH_VAL;
         eqDelBtn.style.display='none';
         eqSaveBtn.style.display = 'inline-block';
+        setEqButtonTint(true);
       }
       renderBands();
     }
@@ -333,6 +362,9 @@ function renderMediaList(mediaList) {
       eqSaveBtn.style.display = 'none';
       // 选择预设后，若占位项存在则移除
       removeCustomPlaceholder();
+      setEqButtonTint(name !== '原始');
+      // 请求后台刷新图标
+      chrome.runtime.sendMessage({ type: 'gmcx-update-icon-for-tab', tabId: tab.id });
     });
     eqSaveBtn.addEventListener('click', async ()=>{
       // 默认覆盖：若当前选择的是某个自定义预设且未输入新名称，则覆盖该名称
@@ -356,6 +388,7 @@ function renderMediaList(mediaList) {
         eqPresetSelect.value = st.name;
         eqDelBtn.style.display='inline-block';
         eqSaveBtn.style.display='none';
+        setEqButtonTint(true);
       }
     });
     eqDelBtn.addEventListener('click', async ()=>{
@@ -365,12 +398,18 @@ function renderMediaList(mediaList) {
       await sendToTab(tab.id, { type: 'gmcx-eq-apply-preset', name: '原始' });
       await loadEQ();
       eqPresetSelect.value = '原始';
+      // 请求后台刷新图标
+      chrome.runtime.sendMessage({ type: 'gmcx-update-icon-for-tab', tabId: tab.id });
     });
     if (eqResetBtn) {
       eqResetBtn.addEventListener('click', async ()=>{
         await sendToTab(tab.id, { type: 'gmcx-eq-reset' });
         // 重载当前状态以同步滑块和选择状态
         await loadEQ();
+        // 立即清除按钮红点
+        setEqButtonTint(false);
+        // 请求后台刷新图标
+        chrome.runtime.sendMessage({ type: 'gmcx-update-icon-for-tab', tabId: tab.id });
       });
     }
     // 倍速选择
@@ -550,6 +589,22 @@ async function refreshMediaList(full = false) {
             if (speedCustom) speedCustom.value = info.playbackRate;
         }
       }
+      // 刷新时同步 EQ 修改徽标
+      try {
+        const url = tab.url || '';
+        const u = new URL(url);
+        const key = 'eqMem:' + u.origin + u.pathname;
+        chrome.storage.local.get([key], (obj) => {
+          const val = obj[key];
+          const gains = val && Array.isArray(val.gains) ? val.gains : null;
+          const modified = !!(gains && gains.some(v => Math.abs(Number(v)||0) > 0.0001));
+          const toggleBtn = card.querySelector('.media-eq-toggle');
+          if (toggleBtn) {
+            if (modified) toggleBtn.classList.add('eq-modified');
+            else toggleBtn.classList.remove('eq-modified');
+          }
+        });
+      } catch {}
     });
   }
 }

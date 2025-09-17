@@ -47,3 +47,16 @@ body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;pad
 .media-audio-group .media-volume {width:70px;cursor:pointer;}
 /* EQ 面板附加样式（保持紧凑） */
 .eq-panel input[type=range][orient=vertical] { writing-mode: bt-lr; }
+/* EQ 修改状态指示（按钮小红点） */
+.media-eq-toggle { position: relative; }
+.media-eq-toggle.eq-modified::after {
+	content: '';
+	position: absolute;
+	top: -2px;
+	right: -2px;
+	width: 8px;
+	height: 8px;
+	background: #e53935;
+	border-radius: 50%;
+	box-shadow: 0 0 0 2px #fff;
+}

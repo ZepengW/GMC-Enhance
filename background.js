@@ -32,6 +32,98 @@ const GLOBAL_MEDIA = {
   volumeStep: 0.05
 };
 
+// ===== 动态着色图标（代码渲染为红色） =====
+const ICON_TINT_CACHE = {
+  baseBlob: null,
+  baseBitmap: null,
+  redImageData: new Map(), // size -> ImageData
+  baseImageData: new Map() // size -> ImageData (untinted)
+};
+async function loadBaseIconBitmap() {
+  if (ICON_TINT_CACHE.baseBitmap) return ICON_TINT_CACHE.baseBitmap;
+  try {
+    const url = chrome.runtime.getURL('icons/icon16.png');
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('fetch icon failed');
+    const blob = await res.blob();
+    ICON_TINT_CACHE.baseBlob = blob;
+    const bmp = await createImageBitmap(blob);
+    ICON_TINT_CACHE.baseBitmap = bmp;
+    return bmp;
+  } catch (e) {
+    return null;
+  }
+}
+async function getRedImageData(size) {
+  if (ICON_TINT_CACHE.redImageData.has(size)) return ICON_TINT_CACHE.redImageData.get(size);
+  try {
+    const bmp = await loadBaseIconBitmap();
+    if (!bmp) return null;
+    const canvas = new OffscreenCanvas(size, size);
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0,0,size,size);
+    // 将 16px 基础图按需缩放绘制
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(bmp, 0, 0, size, size);
+    // 覆盖红色着色，仅覆盖非透明像素
+    ctx.globalCompositeOperation = 'source-atop';
+    ctx.fillStyle = '#e53935';
+    ctx.fillRect(0,0,size,size);
+    ctx.globalCompositeOperation = 'source-over';
+    const imgData = ctx.getImageData(0,0,size,size);
+    ICON_TINT_CACHE.redImageData.set(size, imgData);
+    return imgData;
+  } catch {
+    return null;
+  }
+}
+async function getBaseImageData(size) {
+  if (ICON_TINT_CACHE.baseImageData.has(size)) return ICON_TINT_CACHE.baseImageData.get(size);
+  try {
+    const bmp = await loadBaseIconBitmap();
+    if (!bmp) return null;
+    const canvas = new OffscreenCanvas(size, size);
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0,0,size,size);
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(bmp, 0, 0, size, size);
+    const imgData = ctx.getImageData(0,0,size,size);
+    ICON_TINT_CACHE.baseImageData.set(size, imgData);
+    return imgData;
+  } catch {
+    return null;
+  }
+}
+async function setActionIconModified(tabId, modified) {
+  if (!tabId) return;
+  try {
+    if (modified) {
+      const img16 = await getRedImageData(16);
+      const img32 = await getRedImageData(32);
+      if (img16) {
+        const imageData = img32 ? { 16: img16, 32: img32 } : { 16: img16 };
+        await chrome.action.setIcon({ tabId, imageData });
+        return;
+      }
+      // 回退到静态红色图
+      await chrome.action.setIcon({ tabId, path: { 16: 'icons/icon16_red.png' } });
+      return;
+    }
+    // 默认图标（使用 imageData 覆盖此前的 imageData）
+    const b16 = await getBaseImageData(16);
+    const b32 = await getBaseImageData(32);
+    if (b16) {
+      const imageData = b32 ? { 16: b16, 32: b32 } : { 16: b16 };
+      await chrome.action.setIcon({ tabId, imageData });
+    } else {
+      await chrome.action.setIcon({ tabId, path: { 16: 'icons/icon16.png' } });
+    }
+  } catch {
+    // 出错时回退到路径设置
+    chrome.action.setIcon({ tabId, path: { 16: modified ? 'icons/icon16_red.png' : 'icons/icon16.png' } });
+  }
+}
+
 /**
  * 在未进入强制全局模式 (forceGlobal=false) 时，尝试把当前活动标签页内的媒体
  * 设置为 GLOBAL_MEDIA.selectedIndex ，以实现“同一套界面逻辑 A 默认聚焦当前页面媒体”。
@@ -404,6 +496,62 @@ chrome.storage.onChanged.addListener((changes, area) => {
     if (nv && nv > 0 && nv <= 0.5) GLOBAL_MEDIA.volumeStep = nv;
   }
 });
+// ===== 根据页面存储的 EQ 记忆设置图标（无需依赖弹出页/点击） =====
+function eqPageKeyFromUrl(url) {
+  try {
+    const u = new URL(url);
+    return 'eqMem:' + u.origin + u.pathname;
+  } catch {
+    return null;
+  }
+}
+function checkModifiedFromStored(val) {
+  const gains = val && Array.isArray(val.gains) ? val.gains : null;
+  if (!gains || !gains.length) return false;
+  return gains.some(v => Math.abs(Number(v)||0) > 0.0001);
+}
+function updateIconForTabByUrl(tabId, url) {
+  const key = eqPageKeyFromUrl(url);
+  if (!key) { setActionIconModified(tabId, false); return; }
+  chrome.storage.local.get([key], (obj) => {
+    const modified = checkModifiedFromStored(obj[key]);
+    setActionIconModified(tabId, modified);
+  });
+}
+chrome.tabs.onActivated.addListener(({tabId}) => {
+  chrome.tabs.get(tabId, (tab) => {
+    if (chrome.runtime.lastError || !tab) return;
+    updateIconForTabByUrl(tabId, tab.url || '');
+  });
+});
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status === 'complete' || changeInfo.url) {
+    updateIconForTabByUrl(tabId, (tab && tab.url) || changeInfo.url || '');
+  }
+});
+chrome.runtime.onStartup.addListener(async () => {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab && tab.id) updateIconForTabByUrl(tab.id, tab.url || '');
+  } catch {}
+});
+chrome.windows.onFocusChanged.addListener(async (windowId) => {
+  if (windowId === chrome.windows.WINDOW_ID_NONE) return;
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, windowId });
+    if (tab && tab.id) updateIconForTabByUrl(tab.id, tab.url || '');
+  } catch {}
+});
+// 若存储中的 EQ 记忆发生变化，尝试更新当前活动标签页的图标
+chrome.storage.onChanged.addListener(async (changes, area) => {
+  if (area !== 'local') return;
+  const keys = Object.keys(changes || {});
+  if (!keys.some(k => k.startsWith('eqMem:'))) return;
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab && tab.id) updateIconForTabByUrl(tab.id, tab.url || '');
+  } catch {}
+});
 async function getActiveTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   return tab;
@@ -427,6 +575,25 @@ chrome.commands.onCommand.addListener(async (command) => {
   }
 });
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg?.type === 'gmcx-eq-modified-state') {
+    const tabId = sender?.tab?.id;
+    if (tabId) setActionIconModified(tabId, !!msg.modified);
+    sendResponse && sendResponse({ok:true});
+    return; // not async
+  }
+  if (msg?.type === 'gmcx-update-icon-for-tab') {
+    const tabId = msg.tabId;
+    if (typeof tabId === 'number') {
+      chrome.tabs.get(tabId, (tab) => {
+        if (chrome.runtime.lastError || !tab) { sendResponse && sendResponse({ok:false}); return; }
+        updateIconForTabByUrl(tabId, tab.url || '');
+        sendResponse && sendResponse({ok:true});
+      });
+      return true; // async response
+    }
+    sendResponse && sendResponse({ok:false});
+    return; // not async
+  }
   if (msg?.type === "gmcx-capture-visible-tab") {
     chrome.tabs.captureVisibleTab({ format: "png" }, (dataUrl) => {
       if (chrome.runtime.lastError) {

@@ -5,6 +5,30 @@ function sendToTab(tabId, msg) {
   });
 }
 
+// 配置：从 options 继承快进/快退步长
+let SEEK_STEP = 5;
+chrome.storage.sync.get({ seekStep: 5 }, (cfg) => {
+  const v = Number(cfg.seekStep);
+  if (v && v > 0) SEEK_STEP = v;
+});
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'sync' && changes.seekStep) {
+    const v = Number(changes.seekStep.newValue);
+    if (v && v > 0) {
+      SEEK_STEP = v;
+      // 更新已有卡片的提示
+      try {
+        document.querySelectorAll('.media-card').forEach((card) => {
+          const backBtn = card.querySelector('.media-back');
+          const fwdBtn = card.querySelector('.media-forward');
+          if (backBtn) backBtn.title = `快退 ${SEEK_STEP}s`;
+          if (fwdBtn) fwdBtn.title = `快进 ${SEEK_STEP}s`;
+        });
+      } catch {}
+    }
+  }
+});
+
 // 时间格式化，与 content.js 保持一致（必要时可抽取共用）
 function formatTimeLocal(t) {
   if (!isFinite(t)) return '--:--';
@@ -138,20 +162,14 @@ function renderMediaList(mediaList) {
     // 控件事件
     // 播放/暂停
     card.querySelector('.media-play').addEventListener('click', async () => {
-      // 重新获取最新状态，确保切换正确
-      const updated = await sendToTab(tab.id, {type: 'gmcx-get-media-info'});
-      if (updated && updated.ok) {
-        if (updated.paused) {
-          await sendToTab(tab.id, {type: 'gmcx-play-media'});
-        } else {
-          await sendToTab(tab.id, {type: 'gmcx-pause-media'});
-        }
-        refreshMediaList();
-      }
+      await chrome.runtime.sendMessage({ type: 'gmcx-control', action: 'play-toggle', tabId: tab.id });
+      refreshMediaList(false);
     });
     // 前进/后退（点击累积逻辑）
   const backBtn = card.querySelector('.media-back');
   const fwdBtn = card.querySelector('.media-forward');
+  if (backBtn) backBtn.title = `快退 ${SEEK_STEP}s`;
+  if (fwdBtn) fwdBtn.title = `快进 ${SEEK_STEP}s`;
   const getSeekBar = () => card.querySelector('.seek-bar');
   const getTimeEl = () => card.querySelector('.media-time');
 
@@ -165,8 +183,8 @@ function renderMediaList(mediaList) {
         const delta = entry.pending;
         seekAccum.delete(tabId);
         if (delta === 0) return;
-        // 发送 seek（使用 gmcx-seek-media 增量跳转）
-        await sendToTab(tabId, {type: 'gmcx-seek-media', value: delta});
+        // 发送 seek（后台统一触发，抑制本地覆盖层，展示统一覆盖层A）
+        await chrome.runtime.sendMessage({ type: 'gmcx-control', action: 'seek-delta', tabId, value: delta });
         // 解锁预览，刷新真实信息
         refreshMediaList(false);
       }, SEEK_ACCUM_DEBOUNCE);
@@ -196,25 +214,15 @@ function renderMediaList(mediaList) {
       scheduleSeekCommit(tabId);
     }
 
-    backBtn.addEventListener('click', () => accumulateSeek(tab.id, -10));
-    fwdBtn.addEventListener('click', () => accumulateSeek(tab.id, 10));
+  backBtn.addEventListener('click', () => accumulateSeek(tab.id, -SEEK_STEP));
+  fwdBtn.addEventListener('click', () => accumulateSeek(tab.id, +SEEK_STEP));
     // 静音切换
     // 音量与静音
     const volIcon = card.querySelector('.vol-icon');
     const volSlider = card.querySelector('.media-volume');
     if (volIcon) {
       volIcon.addEventListener('click', async () => {
-        const latest = await sendToTab(tab.id, {type:'gmcx-get-media-info'});
-        if (!latest || !latest.ok) return;
-        if (latest.muted || latest.volume === 0) {
-          // 取消静音：若 volume 为 0 则恢复 0.5
-            if (latest.volume === 0) {
-              await sendToTab(tab.id, {type:'gmcx-set-media-volume', value: 0.5});
-            }
-          await sendToTab(tab.id, {type:'gmcx-unmute-media'});
-        } else {
-          await sendToTab(tab.id, {type:'gmcx-mute-media'});
-        }
+        await chrome.runtime.sendMessage({ type: 'gmcx-control', action: 'toggle-mute', tabId: tab.id });
         refreshMediaList(false);
       });
     }
@@ -224,7 +232,7 @@ function renderMediaList(mediaList) {
         const v = Number(e.target.value);
         clearTimeout(volTimer);
         volTimer = setTimeout(async () => {
-          await sendToTab(tab.id, {type:'gmcx-set-media-volume', value: v});
+          await chrome.runtime.sendMessage({ type: 'gmcx-control', action: 'set-volume', tabId: tab.id, value: v });
           refreshMediaList(false);
         }, 120);
       });
@@ -442,14 +450,14 @@ function renderMediaList(mediaList) {
       } else {
         speedCustom.style.display = 'none';
         speedSelect.style.display = '';
-        await sendToTab(tab.id, {type: 'gmcx-set-media-speed', value: Number(e.target.value)});
+        await chrome.runtime.sendMessage({ type: 'gmcx-control', action: 'set-speed', tabId: tab.id, value: Number(e.target.value) });
         refreshMediaList();
       }
     });
     speedCustom.addEventListener('change', async (e) => {
       const val = Number(e.target.value);
       if (val >= 0.1 && val <= 10) {
-        await sendToTab(tab.id, {type: 'gmcx-set-media-speed', value: val});
+        await chrome.runtime.sendMessage({ type: 'gmcx-control', action: 'set-speed', tabId: tab.id, value: val });
         // 设置完毕后，仅显示自定义倍速输入框（只读）
         speedCustom.style.display = '';
         speedCustom.value = val.toFixed(2);
@@ -484,7 +492,7 @@ function renderMediaList(mediaList) {
       if (!dragging) return;
       try {
         REFRESH_FREEZE_UNTIL = Date.now() + FREEZE_MS;
-        await sendToTab(tab.id, {type: 'gmcx-set-media-currentTime', value: finalVal});
+        await chrome.runtime.sendMessage({ type: 'gmcx-control', action: 'set-currentTime', tabId: tab.id, value: finalVal });
         // 松开后立即获取一次最新状态（精确同步）
         const updated = await sendToTab(tab.id, {type: 'gmcx-get-media-info'});
         if (updated && updated.ok) {

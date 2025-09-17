@@ -637,6 +637,91 @@ chrome.commands.onCommand.addListener(async (command) => {
   }
 });
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg?.type === 'gmcx-control') {
+    (async () => {
+      const { action, tabId, value } = msg;
+      await scanMediaAcrossTabs();
+      const idx = GLOBAL_MEDIA.mediaList.findIndex(e => e.tab && e.tab.id === tabId);
+      if (idx < 0) { sendResponse && sendResponse({ ok: false, reason: 'tab-not-found' }); return; }
+      GLOBAL_MEDIA.selectedIndex = idx;
+      const entry = GLOBAL_MEDIA.mediaList[idx];
+      if (!entry) { sendResponse && sendResponse({ ok:false }); return; }
+      const tid = entry.tab.id;
+      const getInfo = async () => await sendToTab(tid, {type:'gmcx-get-media-info'});
+      const pushOverlay = (info, mode) => {
+        if (!info || !info.ok) return;
+        overlayUpdateOnActive({
+          mode: mode || 'update',
+          index: GLOBAL_MEDIA.selectedIndex + 1,
+          total: GLOBAL_MEDIA.mediaList.length,
+          title: (entry.tab.title || entry.tab.url || '').slice(0,80),
+          paused: info.paused,
+          duration: info.duration,
+          currentTime: info.currentTime,
+          percent: info.rawDuration ? (info.rawCurrentTime / info.rawDuration) * 100 : 0,
+          preview: false,
+          playbackRate: info.playbackRate,
+          volume: info.volume,
+          muted: info.muted
+        });
+      };
+      try {
+        if (action === 'play-toggle') {
+          const st = await getInfo();
+          if (st && st.ok) {
+            if (st.paused) await sendToTab(tid, {type:'gmcx-play-media', silent:true});
+            else await sendToTab(tid, {type:'gmcx-pause-media', silent:true});
+            const after = await getInfo();
+            pushOverlay(after, 'play-toggle');
+            sendResponse && sendResponse({ ok:true }); return;
+          }
+        }
+        if (action === 'seek-delta') {
+          await sendToTab(tid, {type:'gmcx-seek-media', value: Number(value) || 0, silent:true});
+          const after = await getInfo();
+          // 更新基准，避免下一次使用旧时间
+          if (after && after.ok) {
+            GLOBAL_MEDIA.baseTime = after.rawCurrentTime;
+            entry.info = after;
+          }
+          pushOverlay(after, 'final');
+          sendResponse && sendResponse({ ok:true }); return;
+        }
+        if (action === 'set-currentTime') {
+          await sendToTab(tid, {type:'gmcx-set-media-currentTime', value: Number(value) || 0, silent:true});
+          const after = await getInfo();
+          pushOverlay(after, 'final');
+          sendResponse && sendResponse({ ok:true }); return;
+        }
+        if (action === 'set-speed') {
+          await sendToTab(tid, {type:'gmcx-set-media-speed', value: Number(value) || 1, silent:true});
+          const after = await getInfo();
+          pushOverlay(after, 'speed-set');
+          sendResponse && sendResponse({ ok:true }); return;
+        }
+        if (action === 'set-volume') {
+          await sendToTab(tid, {type:'gmcx-set-media-volume', value: Math.max(0, Math.min(1, Number(value) || 0)), silent:true});
+          const after = await getInfo();
+          pushOverlay(after, 'volume-set');
+          sendResponse && sendResponse({ ok:true }); return;
+        }
+        if (action === 'toggle-mute') {
+          const st = await getInfo();
+          if (st && st.ok) {
+            if (st.muted) await sendToTab(tid, {type:'gmcx-unmute-media', silent:true});
+            else await sendToTab(tid, {type:'gmcx-mute-media', silent:true});
+            const after = await getInfo();
+            pushOverlay(after, 'mute-toggle');
+            sendResponse && sendResponse({ ok:true }); return;
+          }
+        }
+        sendResponse && sendResponse({ ok:false });
+      } catch (e) {
+        sendResponse && sendResponse({ ok:false, error: String(e) });
+      }
+    })();
+    return true; // async
+  }
   if (msg?.type === 'gmcx-command') {
     // 若刚刚由 chrome.commands 触发过，则忽略内容脚本的回退请求，防止重复执行
     if (Date.now() - LAST_COMMAND_TS < COMMAND_SUPPRESS_MS) { sendResponse && sendResponse({ ok: false, suppressed: true }); return; }

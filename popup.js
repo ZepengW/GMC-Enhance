@@ -322,6 +322,8 @@ function renderMediaList(mediaList) {
             // 有匹配则移除占位
             removeCustomPlaceholder();
             setEqButtonTint(matched.name !== '原始');
+            // 选中自定义预设时，保存名默认填充为该预设名，便于覆盖
+            eqSaveName.value = isCustom ? matched.name : '';
           } else {
             // 无匹配则确保占位项存在并选中
             ensureCustomPlaceholder();
@@ -360,6 +362,8 @@ function renderMediaList(mediaList) {
         eqDelBtn.style.display = isCustom ? 'inline-block' : 'none';
         eqSaveBtn.style.display = 'none';
         setEqButtonTint(matched.name !== '原始');
+        // 若为自定义预设，右侧保存名默认填充为该预设名
+        eqSaveName.value = isCustom ? matched.name : '';
       } else {
         // 渲染占位项（显示为“自定义”），仅在不匹配时
         const placeholder = document.createElement('option');
@@ -372,6 +376,7 @@ function renderMediaList(mediaList) {
         eqDelBtn.style.display='none';
         eqSaveBtn.style.display = 'inline-block';
         setEqButtonTint(true);
+        eqSaveName.value = '';
       }
       renderBands();
     }
@@ -387,12 +392,15 @@ function renderMediaList(mediaList) {
       const st = await sendToTab(tab.id, {type:'gmcx-eq-get-state'});
       if (st && st.ok) { eqGains = st.gains; renderBands(); }
       // 判断删除按钮是否显示（自定义）
-      eqDelBtn.style.display = Array.from((e.target.querySelector('optgroup[label="自定义"]')||[]).children).some(o=>o.value===name) ? 'inline-block' : 'none';
+      const isCustomSelected = Array.from((e.target.querySelector('optgroup[label="自定义"]')||[]).children).some(o=>o.value===name);
+      eqDelBtn.style.display = isCustomSelected ? 'inline-block' : 'none';
       // 选择了预设 -> 隐藏保存按钮
       eqSaveBtn.style.display = 'none';
       // 选择预设后，若占位项存在则移除
       removeCustomPlaceholder();
       setEqButtonTint(name !== '原始');
+      // 若为自定义预设，右侧保存名默认填充为该预设名，便于随后覆盖保存
+      eqSaveName.value = isCustomSelected ? name : '';
       // 请求后台刷新图标
       chrome.runtime.sendMessage({ type: 'gmcx-update-icon-for-tab', tabId: tab.id });
     });

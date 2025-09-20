@@ -2,8 +2,6 @@
   const STATE = {
     seekStep: 5,
     speedStep: 0.25,
-    hudEl: null,
-    hudTimer: null,
     selectHudEl: null,
   videosCache: [],
     selectedIndex: 0,
@@ -271,25 +269,10 @@
     return list[0] || null;
   }
   function ensureHud() {
-    if (STATE.hudEl) return STATE.hudEl;
-    const el = document.createElement('div');
-    el.id = 'gmcx-hud';
-    el.style.cssText = `position: fixed; top: 10%; left: 50%; transform: translateX(-50%);
-      background: rgba(0,0,0,.6); color: #fff; padding: 10px 14px; border-radius: 12px;
-      font-size: 14px; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-      z-index: 2147483647; box-shadow: 0 6px 20px rgba(0,0,0,.3); pointer-events: none;
-      opacity: 0; transition: opacity .12s ease; backdrop-filter: saturate(140%) blur(6px);`;
-    document.documentElement.appendChild(el);
-    STATE.hudEl = el;
-    return el;
+    // legacy simple HUD removed; all immediate feedback uses rich overlay or select HUD
+    return null;
   }
-  function showHUD(text, ms = 1200) {
-    const el = ensureHud();
-    el.textContent = text;
-    el.style.opacity = '1';
-    clearTimeout(STATE.hudTimer);
-    STATE.hudTimer = setTimeout(() => { el.style.opacity = '0'; }, ms);
-  }
+  // showHUD removed; use showSelectHUD for brief toasts
   // 统一：本地控制也使用底部 fine overlay，而不再使用顶部 HUD 文本
   function updateLocalOverlay(extra = {}) {
     const media = getActiveMedia();
@@ -318,7 +301,15 @@
     icon.style.flex = 'none';
     titleLine.appendChild(icon);
     const titleSpan = document.createElement('span');
-    const indexPrefix = '';
+    let indexPrefix = '';
+    try {
+      // 与全局卡片一致：尝试显示 [当前/总数]
+      const total = STATE.videosCache.length || collectVideos().length;
+      if (total) {
+        const idx = Math.min(STATE.selectedIndex + 1, total);
+        indexPrefix = `[${idx}/${total}] `;
+      }
+    } catch {}
     const name = getMediaName(media) || document.title || '本页媒体';
     const actionAffix = extra.actionLabel ? ` · ${extra.actionLabel}` : '';
     const fullTitle = (indexPrefix + name + actionAffix).slice(0, 120);
@@ -358,30 +349,30 @@
   }
   function seekBy(deltaSec) {
     const media = getActiveMedia();
-    if (!media) { showHUD('未找到媒体'); return; }
+    if (!media) { showSelectHUD('未找到媒体'); return; }
     try {
       const next = media.currentTime + deltaSec;
       media.currentTime = Math.max(0, Math.min(isFinite(media.duration) ? media.duration : next, next));
       updateLocalOverlay({actionLabel: `${deltaSec>=0? '快进':'快退'} ${Math.abs(deltaSec)}s`});
-    } catch { showHUD('无法快进/快退'); }
+    } catch { showSelectHUD('无法快进/快退'); }
   }
   function setRate(rate) {
     const media = getActiveMedia();
-    if (!media) { showHUD('未找到媒体'); return; }
+    if (!media) { showSelectHUD('未找到媒体'); return; }
     rate = Math.max(0.06, Math.min(16, rate));
     media.playbackRate = rate;
     updateLocalOverlay({actionLabel: `速度 ${rate.toFixed(2)}×`});
   }
   function adjustRate(delta) {
     const media = getActiveMedia();
-    if (!media) { showHUD('未找到媒体'); return; }
+    if (!media) { showSelectHUD('未找到媒体'); return; }
     const newRate = Math.max(0.06, Math.min(16, (media.playbackRate || 1) + delta));
     media.playbackRate = newRate;
     updateLocalOverlay({actionLabel: `速度 ${newRate.toFixed(2)}×`});
   }
   function togglePlay() {
     const media = getActiveMedia();
-    if (!media) { showHUD('未找到媒体'); return; }
+    if (!media) { showSelectHUD('未找到媒体'); return; }
     if (media.paused) { media.play?.(); }
     else { media.pause?.(); }
     updateLocalOverlay({actionLabel: media.paused ? '暂停' : '播放'});
@@ -399,7 +390,7 @@
   }
   async function screenshotVideo() {
     const video = getActiveMedia();
-    if (!(video instanceof HTMLVideoElement)) return showHUD('未找到可截图的视频');
+    if (!(video instanceof HTMLVideoElement)) return showSelectHUD('未找到可截图的视频');
     const ts = new Date();
     const fname = `gmcx_${ts.getFullYear()}${String(ts.getMonth()+1).padStart(2,'0')}${String(ts.getDate()).padStart(2,'0')}_${String(ts.getHours()).padStart(2,'0')}${String(ts.getMinutes()).padStart(2,'0')}${String(ts.getSeconds()).padStart(2,'0')}.png`;
     try {
@@ -408,12 +399,12 @@
       const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
       const ctx = canvas.getContext('2d'); ctx.drawImage(video, 0, 0, w, h);
       const blob = await new Promise((res, rej) => canvas.toBlob(b => b ? res(b) : rej(new Error('toBlob failed')), 'image/png'));
-      await saveBlob(blob, fname); showHUD(`已截图 (原始分辨率 ${w}×${h})`); return;
+      await saveBlob(blob, fname); showSelectHUD(`已截图 (原始分辨率 ${w}×${h})`); return;
     } catch (e) { console.debug('Direct video frame grab failed, fallback:', e); }
     const rect = video.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
     chrome.runtime.sendMessage({ type: 'gmcx-capture-visible-tab' }, async (resp) => {
-      if (!resp?.ok) return showHUD('截图失败（无法捕获标签页）');
+  if (!resp?.ok) return showSelectHUD('截图失败（无法捕获标签页）');
       const img = new Image();
       img.onload = async () => {
         try {
@@ -424,15 +415,15 @@
           const canvas = document.createElement('canvas'); canvas.width = sw; canvas.height = sh;
           const ctx = canvas.getContext('2d'); ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
           const blob = await new Promise((res, rej) => canvas.toBlob(b => b ? res(b) : rej(new Error('toBlob failed')), 'image/png'));
-          await saveBlob(blob, fname); showHUD(`已截图 (可见区域裁剪 ${sw}×${sh})`);
-        } catch { showHUD('截图失败（裁剪异常）'); }
+          await saveBlob(blob, fname); showSelectHUD(`已截图 (可见区域裁剪 ${sw}×${sh})`);
+        } catch { showSelectHUD('截图失败（裁剪异常）'); }
       };
-      img.onerror = () => showHUD('截图失败（解码错误）');
+      img.onerror = () => showSelectHUD('截图失败（解码错误）');
       img.src = resp.dataUrl;
     });
   }
   function cycleSpeed(media) {
-    if (!media) return showHUD('未找到媒体');
+    if (!media) return showSelectHUD('未找到媒体');
     // 如果当前速率不在 cycleList 中，先插入
     let idx = STATE.speedCycleList.indexOf(Number(media.playbackRate) || 1);
     if (idx === -1) {
@@ -511,14 +502,54 @@
   function updateFineOverlay(media) {
     const el = ensureFineOverlay();
     el.wrap.style.opacity = '1';
+    STATE.overlayVisible = true;
     const cur = media.currentTime || 0;
     const dur = isFinite(media.duration) ? media.duration : cur + 1;
     const pct = dur ? (cur / dur) * 100 : 0;
     el.barFill.style.width = pct.toFixed(3) + '%';
+    el.barFill.style.background = 'linear-gradient(90deg,#4facfe,#00f2fe)';
     el.left.textContent = formatTime(cur);
     el.right.textContent = isFinite(media.duration) ? formatTime(media.duration) : '--:--';
-    el.center.textContent = `微调 ${STATE.fineSeekDir>0?'+':'-'}${STATE.fineSeekStep.toFixed(2)}s`; // 中间显示步长方向
+    // 使用与卡片A一致的富卡片布局，并在标题中标注微调步长
+    while (el.center.firstChild) el.center.removeChild(el.center.firstChild);
+    el.center.style.display = 'flex';
+    el.center.style.flexDirection = 'column';
+    el.center.style.alignItems = 'stretch';
+    el.center.style.justifyContent = 'flex-start';
+    el.center.style.width = '100%';
+    const titleLine = document.createElement('div');
+    titleLine.style.cssText = 'display:flex;align-items:center;gap:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600;font-size:12px;text-align:left;';
+    const icon = document.createElement('span');
+    icon.textContent = media.paused ? '▶️' : '⏸️';
+    icon.style.flex = 'none';
+    titleLine.appendChild(icon);
+    const titleSpan = document.createElement('span');
+    const name = getMediaName(media) || document.title || '本页媒体';
+    const affix = ` · 微调 ${STATE.fineSeekDir>0?'+':'-'}${STATE.fineSeekStep.toFixed(2)}s`;
+    const fullTitle = (name + affix).slice(0, 120);
+    titleSpan.textContent = fullTitle;
+    titleSpan.title = fullTitle;
+    titleSpan.style.cssText = 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;';
+    titleLine.appendChild(titleSpan);
+    el.center.appendChild(titleLine);
+    const statusLine = document.createElement('div');
+    statusLine.style.cssText = 'margin-top:4px;display:flex;align-items:center;gap:14px;font-variant-numeric:tabular-nums;font-size:11px;opacity:.9;';
+    const rateSpan = document.createElement('span');
+    rateSpan.textContent = (media.playbackRate ? media.playbackRate.toFixed(2) : '1.00') + 'x';
+    const volSpan = document.createElement('span');
+    if (media.muted || media.volume === 0) volSpan.textContent = '🔇';
+    else {
+      const v = Math.round(media.volume * 100);
+      if (v > 66) volSpan.textContent = '🔊 ' + v + '%';
+      else if (v > 33) volSpan.textContent = '🔉 ' + v + '%';
+      else volSpan.textContent = '🔈 ' + v + '%';
+    }
+    statusLine.appendChild(rateSpan);
+    statusLine.appendChild(volSpan);
+    el.center.appendChild(statusLine);
     resetOverlayAutoHide();
+    // 微调不处于预览锁，允许 RAF 正常推进
+    ensureProgressTick();
   }
   function hideFineOverlay() {
     if (!STATE.fineOverlayEl) return;

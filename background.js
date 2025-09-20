@@ -35,6 +35,46 @@ const GLOBAL_MEDIA = {
   seekOpId: 0,
   currentSeekOpId: 0
 };
+// 覆盖层可见期间推送同步（跨标签时启用）
+let OVERLAY_WATCH_TIMER = null;
+
+function stopOverlayWatch() {
+  if (OVERLAY_WATCH_TIMER) {
+    clearInterval(OVERLAY_WATCH_TIMER);
+    OVERLAY_WATCH_TIMER = null;
+  }
+}
+async function startOverlayWatch() {
+  stopOverlayWatch();
+  try {
+    const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const entry = GLOBAL_MEDIA.mediaList[GLOBAL_MEDIA.selectedIndex];
+    if (!entry || !entry.tab || !entry.tab.id) return;
+    // 仅当选中的媒体不在当前活动标签页时，才由后台推送同步，避免与本页 RAF 冲突
+    if (active && active.id === entry.tab.id) return;
+    OVERLAY_WATCH_TIMER = setInterval(async () => {
+      try {
+        const info = await sendToTab(entry.tab.id, { type: 'gmcx-get-media-info' });
+        if (info && info.ok) {
+          overlayUpdateOnActive({
+            mode: 'sync',
+            index: GLOBAL_MEDIA.selectedIndex + 1,
+            total: GLOBAL_MEDIA.mediaList.length,
+            title: (entry.tab.title || entry.tab.url || '').slice(0,80),
+            paused: info.paused,
+            duration: info.duration,
+            currentTime: info.currentTime,
+            percent: info.rawDuration ? (info.rawCurrentTime / info.rawDuration) * 100 : 0,
+            preview: false,
+            playbackRate: info.playbackRate,
+            volume: info.volume,
+            muted: info.muted
+          });
+        }
+      } catch {}
+    }, 200);
+  } catch {}
+}
 // 最近是否由 chrome.commands 触发，避免与内容脚本回退重复处理
 let LAST_COMMAND_TS = 0;
 const COMMAND_SUPPRESS_MS = 300;
@@ -298,7 +338,10 @@ function scheduleSeekCommit() {
     if (!entry) { GLOBAL_MEDIA.seekAccumDelta = 0; return; }
     const opId = GLOBAL_MEDIA.currentSeekOpId;
     try {
-      await sendToTab(entry.tab.id, {type:'gmcx-seek-media', value: GLOBAL_MEDIA.seekAccumDelta, silent: true});
+      // 使用绝对目标时间提交，避免在累计期间播放进度造成的偏移
+      let targetSec = (GLOBAL_MEDIA.baseTime != null ? GLOBAL_MEDIA.baseTime : (entry.info?.rawCurrentTime || 0)) + GLOBAL_MEDIA.seekAccumDelta;
+      targetSec = Math.max(0, Number(targetSec));
+      await sendToTab(entry.tab.id, { type:'gmcx-set-media-currentTime', value: targetSec, silent: true });
       const updated = await sendToTab(entry.tab.id, {type:'gmcx-get-media-info'});
       if (updated && updated.ok) {
         GLOBAL_MEDIA.baseTime = updated.rawCurrentTime;
@@ -328,6 +371,8 @@ function scheduleSeekCommit() {
           muted: updated.muted,
           opId
         });
+        // 若覆盖层仍显示在其他标签上，启动后台推送，保障实时同步
+        startOverlayWatch();
       }
     } finally {
       GLOBAL_MEDIA.seekAccumDelta = 0;
@@ -393,6 +438,8 @@ async function accumulateSeek(delta) {
     muted: info.muted,
     opId
   });
+  // 预览开始时也尝试启动后台推送（跨标签情形会生效）
+  startOverlayWatch();
   scheduleSeekCommit();
 }
 
@@ -793,6 +840,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     GLOBAL_MEDIA.forceGlobal = false;
     // 下次开始新的 seek 时强制重新同步基准
     GLOBAL_MEDIA.baseTime = null;
+    // 结束后台推送
+    stopOverlayWatch();
     sendResponse && sendResponse({ok:true});
     return; // 不需要异步
   }

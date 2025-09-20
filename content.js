@@ -17,7 +17,11 @@
     fineOverlayEl: null,
     overlayHideTimer: null,
     overlayHideDelay: 3000 // 毫秒
-    , lastMediaScanTs: 0
+    , lastMediaScanTs: 0,
+    // 进度条实时刷新
+    overlayVisible: false,
+    progressRafId: 0,
+    seekPreviewActive: false
   };
   // ====== EQ 状态 ======
   const EQ = {
@@ -292,6 +296,7 @@
     if (!media) return;
     const el = ensureFineOverlay();
     el.wrap.style.opacity = '1';
+    STATE.overlayVisible = true;
     const cur = media.currentTime || 0;
     const durRaw = isFinite(media.duration) ? media.duration : cur + 1;
     const pct = durRaw ? (cur / durRaw) * 100 : 0;
@@ -299,27 +304,50 @@
     el.barFill.style.background = 'linear-gradient(90deg,#4facfe,#00f2fe)';
     el.left.textContent = formatTime(cur);
     el.right.textContent = isFinite(media.duration) ? formatTime(media.duration) : '--:--';
-    // 中间显示：播放状态 + 速率 + 音量/静音 或 额外提示
-    let center = '';
-    center += media.paused ? '⏸ ' : '▶ ';
-    if (extra.actionLabel) {
-      center += extra.actionLabel + ' · ';
-    }
-    const rateTxt = (media.playbackRate ? media.playbackRate.toFixed(2) : '1.00') + 'x';
-    let volTxt = '';
-    if (media.muted || media.volume === 0) {
-      volTxt = '🔇';
-    } else {
+    // 统一使用“富卡片”布局：标题行 + 状态行
+    while (el.center.firstChild) el.center.removeChild(el.center.firstChild);
+    el.center.style.display = 'flex';
+    el.center.style.flexDirection = 'column';
+    el.center.style.alignItems = 'stretch';
+    el.center.style.justifyContent = 'flex-start';
+    el.center.style.width = '100%';
+    const titleLine = document.createElement('div');
+    titleLine.style.cssText = 'display:flex;align-items:center;gap:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600;font-size:12px;text-align:left;';
+    const icon = document.createElement('span');
+    icon.textContent = media.paused ? '▶️' : '⏸️';
+    icon.style.flex = 'none';
+    titleLine.appendChild(icon);
+    const titleSpan = document.createElement('span');
+    const indexPrefix = '';
+    const name = getMediaName(media) || document.title || '本页媒体';
+    const actionAffix = extra.actionLabel ? ` · ${extra.actionLabel}` : '';
+    const fullTitle = (indexPrefix + name + actionAffix).slice(0, 120);
+    titleSpan.textContent = fullTitle;
+    titleSpan.title = fullTitle;
+    titleSpan.style.cssText = 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;';
+    titleLine.appendChild(titleSpan);
+    el.center.appendChild(titleLine);
+    const statusLine = document.createElement('div');
+    statusLine.style.cssText = 'margin-top:4px;display:flex;align-items:center;gap:14px;font-variant-numeric:tabular-nums;font-size:11px;opacity:.9;';
+    const rateSpan = document.createElement('span');
+    rateSpan.textContent = (media.playbackRate ? media.playbackRate.toFixed(2) : '1.00') + 'x';
+    const volSpan = document.createElement('span');
+    if (media.muted || media.volume === 0) volSpan.textContent = '🔇';
+    else {
       const v = Math.round(media.volume * 100);
-      if (v > 66) volTxt = '🔊'+v+'%';
-      else if (v > 33) volTxt = '🔉'+v+'%';
-      else volTxt = '🔈'+v+'%';
+      if (v > 66) volSpan.textContent = '🔊 ' + v + '%';
+      else if (v > 33) volSpan.textContent = '🔉 ' + v + '%';
+      else volSpan.textContent = '🔈 ' + v + '%';
     }
-    center += rateTxt + ' · ' + volTxt;
-    el.center.textContent = center;
-    if (el.prev) el.prev.textContent = '';
-    if (el.next) el.next.textContent = '';
+    statusLine.appendChild(rateSpan);
+    statusLine.appendChild(volSpan);
+    el.center.appendChild(statusLine);
+    if (el.prev) { el.prev.textContent = ''; el.prev.style.display = 'none'; }
+    if (el.next) { el.next.textContent = ''; el.next.style.display = 'none'; }
     resetOverlayAutoHide();
+    // 本地触发时不处于预览，开启进度条实时刷新
+    STATE.seekPreviewActive = false;
+    ensureProgressTick();
   }
   function formatTime(t) {
     if (!isFinite(t)) return '--:--';
@@ -495,6 +523,8 @@
   function hideFineOverlay() {
     if (!STATE.fineOverlayEl) return;
     STATE.fineOverlayEl.wrap.style.opacity = '0';
+    STATE.overlayVisible = false;
+    stopProgressTick();
     // 通知后台覆盖层已隐藏，用于恢复到本页优先控制
     try { chrome.runtime.sendMessage({type:'gmcx-overlay-hidden'}); } catch {}
   }
@@ -505,6 +535,38 @@
       if (STATE.fineSeekActive) return;
       hideFineOverlay();
     }, STATE.overlayHideDelay);
+  }
+
+  // ===== 覆盖层进度条实时刷新（绑定当前活动媒体） =====
+  function progressTick() {
+    STATE.progressRafId = 0;
+    if (!STATE.overlayVisible) return;
+    try {
+      if (!STATE.seekPreviewActive) {
+        const media = getActiveMedia();
+        if (media) {
+          const el = ensureFineOverlay();
+          const cur = media.currentTime || 0;
+          const dur = isFinite(media.duration) ? media.duration : cur + 1;
+          const pct = dur ? (cur / dur) * 100 : 0;
+          el.barFill.style.width = pct.toFixed(3) + '%';
+          el.left.textContent = formatTime(cur);
+          el.right.textContent = isFinite(media.duration) ? formatTime(media.duration) : '--:--';
+        }
+      }
+    } catch {}
+    STATE.progressRafId = requestAnimationFrame(progressTick);
+  }
+  function ensureProgressTick() {
+    if (!STATE.overlayVisible) return;
+    if (STATE.progressRafId) return;
+    STATE.progressRafId = requestAnimationFrame(progressTick);
+  }
+  function stopProgressTick() {
+    if (STATE.progressRafId) {
+      cancelAnimationFrame(STATE.progressRafId);
+      STATE.progressRafId = 0;
+    }
   }
 
   window.addEventListener('keydown', (e) => {
@@ -518,12 +580,21 @@
           try { chrome.runtime.sendMessage({ type: 'gmcx-command', command: 'cycle-video' }); } catch {}
           handled = true; e.preventDefault(); break; }
         case 'KeyJ': {
+          // 先本地立即显示覆盖层，提升反馈速度
+          updateLocalOverlay({actionLabel: `快退 ${Math.abs(STATE.seekStep)}s`});
           try { chrome.runtime.sendMessage({ type: 'gmcx-command', command: 'seek-back' }); } catch {}
           handled = true; e.preventDefault(); break; }
         case 'KeyK': {
+          // 先本地立即显示覆盖层（不改变状态，仅提示）
+          try {
+            const m = getActiveMedia();
+            if (m) updateLocalOverlay({actionLabel: m.paused ? '播放' : '暂停'});
+          } catch {}
           try { chrome.runtime.sendMessage({ type: 'gmcx-command', command: 'toggle-play-pause' }); } catch {}
           handled = true; e.preventDefault(); break; }
         case 'KeyL': {
+          // 先本地立即显示覆盖层，提升反馈速度
+          updateLocalOverlay({actionLabel: `快进 ${Math.abs(STATE.seekStep)}s`});
           try { chrome.runtime.sendMessage({ type: 'gmcx-command', command: 'seek-forward' }); } catch {}
           handled = true; e.preventDefault(); break; }
         // 其他按键保留原处理
@@ -608,8 +679,9 @@
           STATE.lastSeekOpId = p.opId;
         }
       }
-      const el = ensureFineOverlay();
-      el.wrap.style.opacity = '1';
+  const el = ensureFineOverlay();
+  el.wrap.style.opacity = '1';
+  STATE.overlayVisible = true;
       while (el.center.firstChild) el.center.removeChild(el.center.firstChild);
       el.center.style.display = 'flex';
       el.center.style.flexDirection = 'column';
@@ -661,15 +733,28 @@
       statusLine.appendChild(rateSpan);
       statusLine.appendChild(volSpan);
       el.center.appendChild(statusLine);
+      // 预览态下不让 RAF 覆盖进度；提交/同步后恢复 RAF
+      STATE.seekPreviewActive = !!p.preview;
       const leftLabel = p.preview && typeof p.previewSeconds === 'number' ? formatTime(p.previewSeconds) : (p.currentTime || '--:--');
       el.left.textContent = leftLabel;
       el.right.textContent = p.duration || '--:--';
       const percent = Math.max(0, Math.min(100, p.percent || 0));
       el.barFill.style.width = percent.toFixed(3) + '%';
       el.barFill.style.background = p.preview ? 'linear-gradient(90deg,#ffb347,#ffcc33)' : 'linear-gradient(90deg,#4facfe,#00f2fe)';
-      if (el.prev) { el.prev.textContent=''; el.prev.style.display='none'; }
-      if (el.next) { el.next.textContent=''; el.next.style.display='none'; }
+      // 预览阶段：在下方左右区显示原位/目标标签
+      if (p.preview) {
+        if (el.prev) { el.prev.textContent = `原位 ${p.currentTime || '--:--'}`; el.prev.style.display='block'; }
+        if (el.next) {
+          const delta = (typeof p.previewSeconds === 'number' && typeof p.currentTime === 'string') ? '' : '';
+          el.next.textContent = `目标 ${formatTime(p.previewSeconds || 0)}`;
+          el.next.style.display='block';
+        }
+      } else {
+        if (el.prev) { el.prev.textContent=''; el.prev.style.display='none'; }
+        if (el.next) { el.next.textContent=''; el.next.style.display='none'; }
+      }
       resetOverlayAutoHide();
+      ensureProgressTick();
       return true;
     }
     // 3) 本地媒体控制（支持 silent 抑制本地覆盖层，避免与全局覆盖层重叠）

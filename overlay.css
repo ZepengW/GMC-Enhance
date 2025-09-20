@@ -1,1 +1,7 @@
 /* overlay.css */
+#gmcx-fine-overlay{
+	will-change: opacity, transform;
+}
+#gmcx-hud,#gmcx-select-hud{
+	will-change: opacity;
+}

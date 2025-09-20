@@ -93,17 +93,20 @@ function renderMediaList(mediaList) {
       }
     }
   // 控件区
+    const isLive = !!info.isLive;
     card.innerHTML = `
       <div class="media-header">
         ${thumbHtml}
         <span class="media-type">${info.type === 'video' ? '🎬 视频' : '🎵 音频'}</span>
+        ${isLive ? '<span class="media-live">LIVE</span>' : ''}
         <span class="media-state">${info.paused ? '⏸ 暂停' : '▶ 播放'}</span>
+        <button class="media-btn media-jump" title="切换到该标签页">↗️</button>
       </div>
       <div class="media-title" title="${tab.title}">${formatTabTitle(tab)}</div>
   <div class="media-controls media-controls-row1">
           <button class="media-btn media-play">${info.paused ? '▶' : '⏸'}</button>
-          <button class="media-btn media-back">⏪</button>
-          <button class="media-btn media-forward">⏩</button>
+          <button class="media-btn media-back" ${isLive ? 'disabled title="直播不可快退"' : ''}>⏪</button>
+          <button class="media-btn media-forward" ${isLive ? 'disabled title="直播不可快进"' : ''}>⏩</button>
           <select class="media-speed">
             <option value="0.5">0.5x</option>
             <option value="0.75">0.75x</option>
@@ -126,9 +129,9 @@ function renderMediaList(mediaList) {
         <button class="media-btn media-eq-toggle" title="音效均衡(EQ)">🎶</button>
       </div>
       <div class="media-progress">
-        <span class="media-time">${info.currentTime}</span> / <span class="media-duration">${info.duration}</span>
+        <span class="media-time">${info.currentTime}</span> / <span class="media-duration">${isLive ? '直播' : info.duration}</span>
       </div>
-      <input type="range" class="seek-bar" min="0" max="${info.rawDuration}" value="${info.rawCurrentTime}" step="0.01" ${!isFinite(info.rawDuration) ? 'disabled' : ''}>
+      <input type="range" class="seek-bar" min="0" max="${info.rawDuration}" value="${info.rawCurrentTime}" step="0.01" ${isLive || !isFinite(info.rawDuration) ? 'disabled' : ''}>
       <div class="eq-panel" style="display:none;margin-top:10px;border-top:1px solid #eee;padding-top:8px;">
         <div class="eq-presets" style="display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap;">
           <select class="eq-preset-select" style="flex:1;min-width:140px;font-size:12px;padding:4px 6px;"></select>
@@ -165,6 +168,19 @@ function renderMediaList(mediaList) {
       await chrome.runtime.sendMessage({ type: 'gmcx-control', action: 'play-toggle', tabId: tab.id });
       refreshMediaList(false);
     });
+    // 跳转到对应标签页
+    const jumpBtn = card.querySelector('.media-jump');
+    if (jumpBtn) {
+      jumpBtn.addEventListener('click', async () => {
+        try {
+          if (typeof tab.windowId === 'number') {
+            await chrome.windows.update(tab.windowId, { focused: true });
+          }
+          await chrome.tabs.update(tab.id, { active: true });
+          window.close();
+        } catch {}
+      });
+    }
     // 前进/后退（点击累积逻辑）
   const backBtn = card.querySelector('.media-back');
   const fwdBtn = card.querySelector('.media-forward');
@@ -214,8 +230,10 @@ function renderMediaList(mediaList) {
       scheduleSeekCommit(tabId);
     }
 
-  backBtn.addEventListener('click', () => accumulateSeek(tab.id, -SEEK_STEP));
-  fwdBtn.addEventListener('click', () => accumulateSeek(tab.id, +SEEK_STEP));
+  if (!isLive) {
+    backBtn.addEventListener('click', () => accumulateSeek(tab.id, -SEEK_STEP));
+    fwdBtn.addEventListener('click', () => accumulateSeek(tab.id, +SEEK_STEP));
+  }
     // 静音切换
     // 音量与静音
     const volIcon = card.querySelector('.vol-icon');
@@ -428,7 +446,15 @@ function renderMediaList(mediaList) {
     const speedSelect = card.querySelector('.media-speed');
     const speedCustom = card.querySelector('.media-speed-custom');
     // 判断是否为自定义倍速
-    if ([0.5,0.75,1,1.25,1.5,2].includes(info.playbackRate)) {
+    if (isLive) {
+      // 直播：禁用倍速，显示当前但不可修改
+      speedSelect.disabled = true;
+      speedCustom.style.display = 'none';
+      speedSelect.style.display = '';
+      let v = Number(info.playbackRate) || 1;
+      if ([0.5,0.75,1,1.25,1.5,2].includes(v)) speedSelect.value = String(v);
+      else speedSelect.value = '1';
+    } else if ([0.5,0.75,1,1.25,1.5,2].includes(info.playbackRate)) {
       speedSelect.value = String(info.playbackRate);
       speedSelect.style.display = '';
       speedCustom.style.display = 'none';
@@ -440,6 +466,7 @@ function renderMediaList(mediaList) {
       speedCustom.readOnly = true;
     }
     speedSelect.addEventListener('change', async (e) => {
+      if (isLive) { return; }
       if (e.target.value === 'custom') {
         // 隐藏下拉栏，显示自定义输入框（可编辑）
         speedSelect.style.display = 'none';
@@ -455,6 +482,7 @@ function renderMediaList(mediaList) {
       }
     });
     speedCustom.addEventListener('change', async (e) => {
+      if (isLive) { return; }
       const val = Number(e.target.value);
       if (val >= 0.1 && val <= 10) {
         await chrome.runtime.sendMessage({ type: 'gmcx-control', action: 'set-speed', tabId: tab.id, value: val });
@@ -479,7 +507,7 @@ function renderMediaList(mediaList) {
       refreshMediaList();
     });
     // 进度条（增加拖动锁逻辑）
-    const seekBar = card.querySelector('.seek-bar');
+  const seekBar = card.querySelector('.seek-bar');
     const timeEl = card.querySelector('.media-time');
 
     let dragging = false; // 仅在该组件生命周期内的局部状态
@@ -508,7 +536,7 @@ function renderMediaList(mediaList) {
     };
 
     // PC 鼠标事件
-    seekBar.addEventListener('mousedown', () => startDrag());
+  if (!isLive) seekBar.addEventListener('mousedown', () => startDrag());
     // 拖动中仅本地更新显示，不发送消息
     seekBar.addEventListener('input', (e) => {
       if (dragging) {
@@ -525,7 +553,7 @@ function renderMediaList(mediaList) {
     };
     window.addEventListener('mouseup', mouseupHandler);
     // Touch 事件（预防触摸设备）
-    seekBar.addEventListener('touchstart', () => startDrag(), {passive: true});
+  if (!isLive) seekBar.addEventListener('touchstart', () => startDrag(), {passive: true});
     seekBar.addEventListener('touchmove', (e) => {
       if (dragging) {
         const val = Number(seekBar.value);

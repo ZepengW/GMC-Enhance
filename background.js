@@ -264,6 +264,7 @@ async function cycleGlobalSelection() {
         percent: fresh.rawDuration ? (fresh.rawCurrentTime / fresh.rawDuration) * 100 : 0,
         preview: false,
         playbackRate: fresh.playbackRate,
+              isLive: !!fresh.isLive,
         volume: fresh.volume,
         muted: fresh.muted
         // 这里暂未包含 volume/muted，后续同步点会补充
@@ -280,6 +281,7 @@ async function cycleGlobalSelection() {
         currentTime: '--:--',
         percent: 0,
         preview: true,
+              isLive: !!info.isLive,
         playbackRate: info.playbackRate,
         volume: info.volume,
         muted: info.muted
@@ -296,6 +298,7 @@ async function cycleGlobalSelection() {
       currentTime: '--:--',
       percent: 0,
       preview: true,
+            isLive: !!info.isLive,
       playbackRate: info.playbackRate,
       volume: info.volume,
       muted: info.muted
@@ -317,6 +320,7 @@ async function ensureBaseTime(opId) {
       index: GLOBAL_MEDIA.selectedIndex + 1,
       total: GLOBAL_MEDIA.mediaList.length,
       title: (tab.title || tab.url || '').slice(0,80),
+      isLive: !!updated.isLive,
       paused: updated.paused,
       duration: updated.duration,
       currentTime: updated.currentTime,
@@ -347,6 +351,7 @@ function scheduleSeekCommit() {
         GLOBAL_MEDIA.baseTime = updated.rawCurrentTime;
         // 提交后将媒体信息写回列表，减少下次使用陈旧 info 的概率
         entry.info = {
+          isLive: !!updated.isLive,
           paused: updated.paused,
           duration: updated.duration,
           currentTime: updated.currentTime,
@@ -361,6 +366,7 @@ function scheduleSeekCommit() {
           index: GLOBAL_MEDIA.selectedIndex + 1,
           total: GLOBAL_MEDIA.mediaList.length,
             title: (entry.tab.title || entry.tab.url || '').slice(0,80),
+          isLive: !!updated.isLive,
           paused: updated.paused,
           duration: updated.duration,
           currentTime: updated.currentTime,
@@ -567,6 +573,25 @@ async function adjustPlaybackRate(delta) {
   if (!entry) return;
   const info = await sendToTab(entry.tab.id, {type:'gmcx-get-media-info'});
   if (!info || !info.ok) return;
+  if (info.isLive) {
+    // 直播：不改变倍速，仅弹出卡片提示
+    overlayUpdateOnActive({
+      mode:'speed-set',
+      index: GLOBAL_MEDIA.selectedIndex + 1,
+      total: GLOBAL_MEDIA.mediaList.length,
+      title: (entry.tab.title || entry.tab.url || '').slice(0,80),
+      isLive: true,
+      paused: info.paused,
+      duration: info.duration,
+      currentTime: info.currentTime,
+      percent: info.rawDuration ? (info.rawCurrentTime / info.rawDuration) * 100 : 0,
+      preview: false,
+      playbackRate: info.playbackRate,
+      volume: info.volume,
+      muted: info.muted
+    });
+    return;
+  }
   let next = (info.playbackRate || 1) + delta;
   next = Math.min(16, Math.max(0.06, Number(next.toFixed(2))));
   await applyPlaybackRate(next);
@@ -679,8 +704,15 @@ chrome.commands.onCommand.addListener(async (command) => {
     await ensureActiveSelection(tab.id); // 在非全局模式下优先当前活动标签媒体
     if (GLOBAL_MEDIA.selectedIndex < 0) return; // 没有媒体则直接忽略
     if (command === 'toggle-play-pause') { await togglePlayGlobal(); return; }
-    if (command === 'seek-forward') { await accumulateSeek(+GLOBAL_MEDIA.seekStep); return; }
-    if (command === 'seek-back') { await accumulateSeek(-GLOBAL_MEDIA.seekStep); return; }
+    const entry = GLOBAL_MEDIA.mediaList[GLOBAL_MEDIA.selectedIndex];
+    const info = entry && await sendToTab(entry.tab.id, { type: 'gmcx-get-media-info' });
+    const isLive = !!(info && info.ok && info.isLive);
+    if (command === 'seek-forward') {
+      if (isLive) { overlayUpdateOnActive({ mode:'seek-preview', index: GLOBAL_MEDIA.selectedIndex+1, total: GLOBAL_MEDIA.mediaList.length, title:(entry.tab.title||entry.tab.url||'').slice(0,80), isLive:true, paused: info.paused, duration: info.duration, currentTime: info.currentTime, percent: 0, preview:false, playbackRate: info.playbackRate, volume: info.volume, muted: info.muted }); return; }
+      await accumulateSeek(+GLOBAL_MEDIA.seekStep); return; }
+    if (command === 'seek-back') {
+      if (isLive) { overlayUpdateOnActive({ mode:'seek-preview', index: GLOBAL_MEDIA.selectedIndex+1, total: GLOBAL_MEDIA.mediaList.length, title:(entry.tab.title||entry.tab.url||'').slice(0,80), isLive:true, paused: info.paused, duration: info.duration, currentTime: info.currentTime, percent: 0, preview:false, playbackRate: info.playbackRate, volume: info.volume, muted: info.muted }); return; }
+      await accumulateSeek(-GLOBAL_MEDIA.seekStep); return; }
   }
 });
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -787,8 +819,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         await ensureActiveSelection(tab.id);
         if (GLOBAL_MEDIA.selectedIndex < 0) { sendResponse && sendResponse({ ok: false }); return; }
         if (command === 'toggle-play-pause') { await togglePlayGlobal(); sendResponse && sendResponse({ ok: true }); return; }
-        if (command === 'seek-forward') { await accumulateSeek(+GLOBAL_MEDIA.seekStep); sendResponse && sendResponse({ ok: true }); return; }
-        if (command === 'seek-back') { await accumulateSeek(-GLOBAL_MEDIA.seekStep); sendResponse && sendResponse({ ok: true }); return; }
+        const entry = GLOBAL_MEDIA.mediaList[GLOBAL_MEDIA.selectedIndex];
+        const info = entry && await sendToTab(entry.tab.id, { type: 'gmcx-get-media-info' });
+        const isLive = !!(info && info.ok && info.isLive);
+        if (command === 'seek-forward') { if (isLive) { overlayUpdateOnActive({ mode:'seek-preview', index: GLOBAL_MEDIA.selectedIndex+1, total: GLOBAL_MEDIA.mediaList.length, title:(entry.tab.title||entry.tab.url||'').slice(0,80), isLive:true, paused: info.paused, duration: info.duration, currentTime: info.currentTime, percent: 0, preview:false, playbackRate: info.playbackRate, volume: info.volume, muted: info.muted }); sendResponse && sendResponse({ ok: true }); return; } await accumulateSeek(+GLOBAL_MEDIA.seekStep); sendResponse && sendResponse({ ok: true }); return; }
+        if (command === 'seek-back') { if (isLive) { overlayUpdateOnActive({ mode:'seek-preview', index: GLOBAL_MEDIA.selectedIndex+1, total: GLOBAL_MEDIA.mediaList.length, title:(entry.tab.title||entry.tab.url||'').slice(0,80), isLive:true, paused: info.paused, duration: info.duration, currentTime: info.currentTime, percent: 0, preview:false, playbackRate: info.playbackRate, volume: info.volume, muted: info.muted }); sendResponse && sendResponse({ ok: true }); return; } await accumulateSeek(-GLOBAL_MEDIA.seekStep); sendResponse && sendResponse({ ok: true }); return; }
       }
       sendResponse && sendResponse({ ok: false });
     })();

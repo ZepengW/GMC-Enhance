@@ -713,6 +713,12 @@
       titleSpan.title = fullTitle;
       titleSpan.style.cssText = 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;';
       titleLine.appendChild(titleSpan);
+      if (p.isLive) {
+        const liveBadge = document.createElement('span');
+        liveBadge.textContent = 'LIVE';
+        liveBadge.style.cssText = 'flex:none;margin-left:8px;color:#e53935;font-weight:700;font-size:11px;letter-spacing:.5px;';
+        titleLine.appendChild(liveBadge);
+      }
       el.center.appendChild(titleLine);
       const statusLine = document.createElement('div');
       statusLine.style.cssText = 'margin-top:4px;display:flex;align-items:center;gap:14px;font-variant-numeric:tabular-nums;font-size:11px;opacity:.9;';
@@ -733,16 +739,18 @@
       statusLine.appendChild(rateSpan);
       statusLine.appendChild(volSpan);
       el.center.appendChild(statusLine);
+      // Live 流：不显示预览偏移，左侧只显示当前；点播：预览显示目标
       // 预览态下不让 RAF 覆盖进度；提交/同步后恢复 RAF
       STATE.seekPreviewActive = !!p.preview;
-      const leftLabel = p.preview && typeof p.previewSeconds === 'number' ? formatTime(p.previewSeconds) : (p.currentTime || '--:--');
+      const leftLabel = (p.isLive ? (p.currentTime || '--:--') : (p.preview && typeof p.previewSeconds === 'number' ? formatTime(p.previewSeconds) : (p.currentTime || '--:--')));
       el.left.textContent = leftLabel;
-      el.right.textContent = p.duration || '--:--';
+      el.right.textContent = (p.isLive ? '直播' : (p.duration || '--:--'));
       const percent = Math.max(0, Math.min(100, p.percent || 0));
       el.barFill.style.width = percent.toFixed(3) + '%';
-      el.barFill.style.background = p.preview ? 'linear-gradient(90deg,#ffb347,#ffcc33)' : 'linear-gradient(90deg,#4facfe,#00f2fe)';
+      // live 使用红色风格
+      el.barFill.style.background = p.isLive ? 'linear-gradient(90deg,#ff5252,#ff1744)' : (p.preview ? 'linear-gradient(90deg,#ffb347,#ffcc33)' : 'linear-gradient(90deg,#4facfe,#00f2fe)');
       // 预览阶段：在下方左右区显示原位/目标标签
-      if (p.preview) {
+      if (p.preview && !p.isLive) {
         if (el.prev) { el.prev.textContent = `原位 ${p.currentTime || '--:--'}`; el.prev.style.display='block'; }
         if (el.next) {
           const delta = (typeof p.previewSeconds === 'number' && typeof p.currentTime === 'string') ? '' : '';
@@ -777,7 +785,7 @@
     if (msg?.type === 'gmcx-eq-save-preset') { const media = getActiveMedia(); if (!media) { sendResponse({ok:false}); return; } const entry = ensureMediaEQ(media); if (!entry) { sendResponse({ok:false}); return; } const gains = entry.filters.map(f => f.gain.value); loadCustomPresets(() => { const name = String(msg.name || '').trim().slice(0,40) || ('Preset'+Date.now()); const existIdx = EQ.customPresets.findIndex(p => p.name === name); if (existIdx >= 0) EQ.customPresets[existIdx] = {name, gains}; else EQ.customPresets.push({name, gains}); saveCustomPresets(); sendResponse({ok:true, name}); }); return true; }
     if (msg?.type === 'gmcx-eq-delete-preset') { loadCustomPresets(() => { const name = msg.name; const before = EQ.customPresets.length; EQ.customPresets = EQ.customPresets.filter(p => p.name !== name); if (EQ.customPresets.length !== before) saveCustomPresets(); sendResponse({ok:true}); }); return true; }
     // 5) 全局媒体探测（供后台扫描使用）
-    if (msg?.type === 'gmcx-get-media-info') {
+  if (msg?.type === 'gmcx-get-media-info') {
       const blacklist = ['https://www.bilibili.com/','https://www.douyu.com/'];
       if (blacklist.includes(window.location.href)) { sendResponse({ ok: false }); return; }
       if (window.top !== window.self) { sendResponse({ ok: false }); return; }
@@ -787,13 +795,14 @@
       if (media instanceof HTMLVideoElement && ((media.muted || media.volume === 0) && (media.currentTime || 0) < 3) && (media.videoWidth < 240 || media.videoHeight < 180 || media.clientWidth < 240 || media.clientHeight < 180)) {
         sendResponse({ ok: false }); return;
       }
-      const type = media instanceof HTMLVideoElement ? 'video' : 'audio';
+  const type = media instanceof HTMLVideoElement ? 'video' : 'audio';
+  const isLive = !isFinite(media.duration);
       const paused = !!media.paused;
       const currentTime = formatTime(media.currentTime);
       const duration = formatTime(media.duration);
       let thumbnail = '';
       if (type === 'video') { thumbnail = media.poster || ''; }
-      sendResponse({ ok: true, type, paused, currentTime, duration, rawCurrentTime: media.currentTime, rawDuration: media.duration, playbackRate: media.playbackRate, thumbnail, muted: media.muted, volume: media.volume });
+      sendResponse({ ok: true, type, isLive, paused, currentTime, duration, rawCurrentTime: media.currentTime, rawDuration: media.duration, playbackRate: media.playbackRate, thumbnail, muted: media.muted, volume: media.volume });
       return;
     }
   });

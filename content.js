@@ -19,7 +19,8 @@
     // 进度条实时刷新
     overlayVisible: false,
     progressRafId: 0,
-    seekPreviewActive: false
+    seekPreviewActive: false,
+    isRemoteOverlay: false
   };
   // ====== EQ 状态 ======
   const EQ = {
@@ -249,6 +250,15 @@
     if (m instanceof HTMLVideoElement) return `视频 ${m.videoWidth}x${m.videoHeight}`;
     return '音频';
   }
+  // 统一显示标题：优先页面标题，避免出现“视频 1920x1080”之类的分辨率占位
+  function getDisplayTitle(media) {
+    const pageTitle = (document.title || '').trim();
+    if (pageTitle) return pageTitle.slice(0, 120);
+    const name = (getMediaName(media) || '').trim();
+    if (!name) return '本页媒体';
+    if (/^视频\s+\d+x\d+$/i.test(name) || name === '音频') return '本页媒体';
+    return name.slice(0, 120);
+  }
   function cycleSelectedMedia() {
     STATE.videosCache = collectVideos();
     if (!STATE.videosCache.length) {
@@ -257,7 +267,7 @@
     }
     STATE.selectedIndex = (STATE.selectedIndex + 1) % STATE.videosCache.length;
     const media = STATE.videosCache[STATE.selectedIndex];
-    const name = getMediaName(media);
+    const name = getDisplayTitle(media);
     showSelectHUD(`切换 (${STATE.selectedIndex+1}/${STATE.videosCache.length}) ${name}`);
   }
 
@@ -280,6 +290,7 @@
     const el = ensureFineOverlay();
     el.wrap.style.opacity = '1';
     STATE.overlayVisible = true;
+    STATE.isRemoteOverlay = false; // 本地触发，标记为非远程
     const cur = media.currentTime || 0;
     const durRaw = isFinite(media.duration) ? media.duration : cur + 1;
     const pct = durRaw ? (cur / durRaw) * 100 : 0;
@@ -310,7 +321,7 @@
         indexPrefix = `[${idx}/${total}] `;
       }
     } catch {}
-    const name = getMediaName(media) || document.title || '本页媒体';
+  const name = getDisplayTitle(media);
     const actionAffix = extra.actionLabel ? ` · ${extra.actionLabel}` : '';
     const fullTitle = (indexPrefix + name + actionAffix).slice(0, 120);
     titleSpan.textContent = fullTitle;
@@ -503,6 +514,7 @@
     const el = ensureFineOverlay();
     el.wrap.style.opacity = '1';
     STATE.overlayVisible = true;
+    STATE.isRemoteOverlay = false; // 本地微调，标记为非远程
     const cur = media.currentTime || 0;
     const dur = isFinite(media.duration) ? media.duration : cur + 1;
     const pct = dur ? (cur / dur) * 100 : 0;
@@ -524,7 +536,7 @@
     icon.style.flex = 'none';
     titleLine.appendChild(icon);
     const titleSpan = document.createElement('span');
-    const name = getMediaName(media) || document.title || '本页媒体';
+  const name = getDisplayTitle(media);
     const affix = ` · 微调 ${STATE.fineSeekDir>0?'+':'-'}${STATE.fineSeekStep.toFixed(2)}s`;
     const fullTitle = (name + affix).slice(0, 120);
     titleSpan.textContent = fullTitle;
@@ -573,7 +585,7 @@
     STATE.progressRafId = 0;
     if (!STATE.overlayVisible) return;
     try {
-      if (!STATE.seekPreviewActive) {
+      if (!STATE.seekPreviewActive && !STATE.isRemoteOverlay) {
         const media = getActiveMedia();
         if (media) {
           const el = ensureFineOverlay();
@@ -710,6 +722,8 @@
           STATE.lastSeekOpId = p.opId;
         }
       }
+  // 标记远程覆盖层状态（用于抑制本地 RAF 进度）
+  STATE.isRemoteOverlay = !!p.isRemote;
   const el = ensureFineOverlay();
   el.wrap.style.opacity = '1';
   STATE.overlayVisible = true;

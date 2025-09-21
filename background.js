@@ -68,7 +68,9 @@ async function startOverlayWatch() {
             preview: false,
             playbackRate: info.playbackRate,
             volume: info.volume,
-            muted: info.muted
+            muted: info.muted,
+            isLive: !!info.isLive,
+            controlledTabId: entry.tab.id
           });
         }
       } catch {}
@@ -200,7 +202,14 @@ function overlayUpdateOnActive(payload) {
   const seq = ++GLOBAL_MEDIA.overlaySeq;
   chrome.tabs.query({active:true, currentWindow:true}, ([tab]) => {
     if (!tab) return;
-    sendToContent(tab.id, {type:'gmcx-global-overlay', action:'update', payload: { ...payload, seq }});
+    try {
+      const activeId = tab.id;
+      const ctl = typeof payload.controlledTabId === 'number' ? payload.controlledTabId : undefined;
+      const isRemote = ctl != null ? (ctl !== activeId) : false;
+      sendToContent(activeId, { type:'gmcx-global-overlay', action:'update', payload: { ...payload, seq, isRemote } });
+    } catch {
+      sendToContent(tab.id, {type:'gmcx-global-overlay', action:'update', payload: { ...payload, seq }});
+    }
   });
 }
 
@@ -266,7 +275,8 @@ async function cycleGlobalSelection() {
         playbackRate: fresh.playbackRate,
               isLive: !!fresh.isLive,
         volume: fresh.volume,
-        muted: fresh.muted
+        muted: fresh.muted,
+        controlledTabId: tab.id
         // 这里暂未包含 volume/muted，后续同步点会补充
       });
       GLOBAL_MEDIA.baseTime = fresh.rawCurrentTime; // 直接设置基准
@@ -284,7 +294,8 @@ async function cycleGlobalSelection() {
               isLive: !!info.isLive,
         playbackRate: info.playbackRate,
         volume: info.volume,
-        muted: info.muted
+        muted: info.muted,
+        controlledTabId: tab.id
       });
     }
   } catch {
@@ -301,7 +312,8 @@ async function cycleGlobalSelection() {
             isLive: !!info.isLive,
       playbackRate: info.playbackRate,
       volume: info.volume,
-      muted: info.muted
+      muted: info.muted,
+      controlledTabId: tab.id
     });
   }
   GLOBAL_MEDIA.forceGlobal = true; // 用户显式切换后进入全局优先模式
@@ -329,6 +341,7 @@ async function ensureBaseTime(opId) {
       playbackRate: updated.playbackRate,
       volume: updated.volume,
       muted: updated.muted,
+      controlledTabId: tab.id,
       opId
     });
   }
@@ -375,6 +388,7 @@ function scheduleSeekCommit() {
           playbackRate: updated.playbackRate,
           volume: updated.volume,
           muted: updated.muted,
+          controlledTabId: entry.tab.id,
           opId
         });
         // 若覆盖层仍显示在其他标签上，启动后台推送，保障实时同步
@@ -442,6 +456,7 @@ async function accumulateSeek(delta) {
     playbackRate: info.playbackRate,
     volume: info.volume,
     muted: info.muted,
+    controlledTabId: tab.id,
     opId
   });
   // 预览开始时也尝试启动后台推送（跨标签情形会生效）
@@ -470,7 +485,8 @@ async function togglePlayGlobal() {
         preview: false,
         playbackRate: after.playbackRate,
         volume: after.volume,
-        muted: after.muted
+        muted: after.muted,
+        controlledTabId: entry.tab.id
       });
     }
   }
@@ -501,7 +517,8 @@ async function toggleMuteGlobal() {
       preview: false,
       playbackRate: after.playbackRate,
       volume: after.volume,
-      muted: after.muted
+      muted: after.muted,
+      controlledTabId: entry.tab.id
     });
   }
 }
@@ -526,7 +543,8 @@ async function applyPlaybackRate(rate) {
       preview: false,
       playbackRate: after.playbackRate,
       volume: after.volume,
-      muted: after.muted
+      muted: after.muted,
+      controlledTabId: entry.tab.id
     });
   }
 }
@@ -552,7 +570,8 @@ async function applyVolume(vol) {
       preview: false,
       playbackRate: after.playbackRate,
       volume: after.volume,
-      muted: after.muted
+      muted: after.muted,
+      controlledTabId: entry.tab.id
     });
   }
 }
@@ -588,7 +607,8 @@ async function adjustPlaybackRate(delta) {
       preview: false,
       playbackRate: info.playbackRate,
       volume: info.volume,
-      muted: info.muted
+      muted: info.muted,
+      controlledTabId: entry.tab.id
     });
     return;
   }
@@ -708,10 +728,10 @@ chrome.commands.onCommand.addListener(async (command) => {
     const info = entry && await sendToTab(entry.tab.id, { type: 'gmcx-get-media-info' });
     const isLive = !!(info && info.ok && info.isLive);
     if (command === 'seek-forward') {
-      if (isLive) { overlayUpdateOnActive({ mode:'seek-preview', index: GLOBAL_MEDIA.selectedIndex+1, total: GLOBAL_MEDIA.mediaList.length, title:(entry.tab.title||entry.tab.url||'').slice(0,80), isLive:true, paused: info.paused, duration: info.duration, currentTime: info.currentTime, percent: 0, preview:false, playbackRate: info.playbackRate, volume: info.volume, muted: info.muted }); return; }
+      if (isLive) { overlayUpdateOnActive({ mode:'seek-preview', index: GLOBAL_MEDIA.selectedIndex+1, total: GLOBAL_MEDIA.mediaList.length, title:(entry.tab.title||entry.tab.url||'').slice(0,80), isLive:true, paused: info.paused, duration: info.duration, currentTime: info.currentTime, percent: 0, preview:false, playbackRate: info.playbackRate, volume: info.volume, muted: info.muted, controlledTabId: entry.tab.id }); return; }
       await accumulateSeek(+GLOBAL_MEDIA.seekStep); return; }
     if (command === 'seek-back') {
-      if (isLive) { overlayUpdateOnActive({ mode:'seek-preview', index: GLOBAL_MEDIA.selectedIndex+1, total: GLOBAL_MEDIA.mediaList.length, title:(entry.tab.title||entry.tab.url||'').slice(0,80), isLive:true, paused: info.paused, duration: info.duration, currentTime: info.currentTime, percent: 0, preview:false, playbackRate: info.playbackRate, volume: info.volume, muted: info.muted }); return; }
+      if (isLive) { overlayUpdateOnActive({ mode:'seek-preview', index: GLOBAL_MEDIA.selectedIndex+1, total: GLOBAL_MEDIA.mediaList.length, title:(entry.tab.title||entry.tab.url||'').slice(0,80), isLive:true, paused: info.paused, duration: info.duration, currentTime: info.currentTime, percent: 0, preview:false, playbackRate: info.playbackRate, volume: info.volume, muted: info.muted, controlledTabId: entry.tab.id }); return; }
       await accumulateSeek(-GLOBAL_MEDIA.seekStep); return; }
   }
 });
@@ -741,7 +761,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           preview: false,
           playbackRate: info.playbackRate,
           volume: info.volume,
-          muted: info.muted
+          muted: info.muted,
+          controlledTabId: tid
         });
       };
       try {
@@ -822,8 +843,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const entry = GLOBAL_MEDIA.mediaList[GLOBAL_MEDIA.selectedIndex];
         const info = entry && await sendToTab(entry.tab.id, { type: 'gmcx-get-media-info' });
         const isLive = !!(info && info.ok && info.isLive);
-        if (command === 'seek-forward') { if (isLive) { overlayUpdateOnActive({ mode:'seek-preview', index: GLOBAL_MEDIA.selectedIndex+1, total: GLOBAL_MEDIA.mediaList.length, title:(entry.tab.title||entry.tab.url||'').slice(0,80), isLive:true, paused: info.paused, duration: info.duration, currentTime: info.currentTime, percent: 0, preview:false, playbackRate: info.playbackRate, volume: info.volume, muted: info.muted }); sendResponse && sendResponse({ ok: true }); return; } await accumulateSeek(+GLOBAL_MEDIA.seekStep); sendResponse && sendResponse({ ok: true }); return; }
-        if (command === 'seek-back') { if (isLive) { overlayUpdateOnActive({ mode:'seek-preview', index: GLOBAL_MEDIA.selectedIndex+1, total: GLOBAL_MEDIA.mediaList.length, title:(entry.tab.title||entry.tab.url||'').slice(0,80), isLive:true, paused: info.paused, duration: info.duration, currentTime: info.currentTime, percent: 0, preview:false, playbackRate: info.playbackRate, volume: info.volume, muted: info.muted }); sendResponse && sendResponse({ ok: true }); return; } await accumulateSeek(-GLOBAL_MEDIA.seekStep); sendResponse && sendResponse({ ok: true }); return; }
+  if (command === 'seek-forward') { if (isLive) { overlayUpdateOnActive({ mode:'seek-preview', index: GLOBAL_MEDIA.selectedIndex+1, total: GLOBAL_MEDIA.mediaList.length, title:(entry.tab.title||entry.tab.url||'').slice(0,80), isLive:true, paused: info.paused, duration: info.duration, currentTime: info.currentTime, percent: 0, preview:false, playbackRate: info.playbackRate, volume: info.volume, muted: info.muted, controlledTabId: entry.tab.id }); sendResponse && sendResponse({ ok: true }); return; } await accumulateSeek(+GLOBAL_MEDIA.seekStep); sendResponse && sendResponse({ ok: true }); return; }
+  if (command === 'seek-back') { if (isLive) { overlayUpdateOnActive({ mode:'seek-preview', index: GLOBAL_MEDIA.selectedIndex+1, total: GLOBAL_MEDIA.mediaList.length, title:(entry.tab.title||entry.tab.url||'').slice(0,80), isLive:true, paused: info.paused, duration: info.duration, currentTime: info.currentTime, percent: 0, preview:false, playbackRate: info.playbackRate, volume: info.volume, muted: info.muted, controlledTabId: entry.tab.id }); sendResponse && sendResponse({ ok: true }); return; } await accumulateSeek(-GLOBAL_MEDIA.seekStep); sendResponse && sendResponse({ ok: true }); return; }
       }
       sendResponse && sendResponse({ ok: false });
     })();

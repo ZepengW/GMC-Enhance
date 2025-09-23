@@ -1,7 +1,9 @@
 /* overlay.css */
 #gmcx-fine-overlay{
 	will-change: opacity, transform;
+	pointer-events: none; /* never block clicks below */
 }
 #gmcx-select-hud{
 	will-change: opacity;
+	pointer-events: none; /* safety: hud never intercepts */
 }

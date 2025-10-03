@@ -40,6 +40,25 @@
   };
   // ====== EQ 记忆（按页面） ======
   const EQMEM = { applied: false };
+  function rememberActiveMedia(media) {
+    if (!(media instanceof HTMLMediaElement)) return;
+    try {
+      if (typeof WeakRef !== 'undefined') {
+        STATE.lastMediaWeak = new WeakRef(media);
+        return;
+      }
+    } catch {}
+    STATE.lastMediaWeak = media;
+  }
+  function recallLastMedia() {
+    const ref = STATE.lastMediaWeak;
+    if (!ref) return null;
+    if (typeof WeakRef !== 'undefined' && typeof WeakRef === 'function' && ref instanceof WeakRef) {
+      const media = ref.deref?.();
+      return media && document.contains(media) ? media : null;
+    }
+    return (ref instanceof HTMLMediaElement && document.contains(ref)) ? ref : null;
+  }
   function normalizePageKey() {
     try {
       const u = new URL(window.location.href);
@@ -179,7 +198,7 @@
     // 1. 正在播放的优先 (paused=false)
     // 2. 与视口中线距离更小
     // 3. 面积更大
-    medias.sort((a,b) => {
+  medias.sort((a,b) => {
       const aPlaying = a.paused ? 0 : 1;
       const bPlaying = b.paused ? 0 : 1;
       if (bPlaying - aPlaying) return bPlaying - aPlaying;
@@ -192,11 +211,18 @@
       const areaB = (b instanceof HTMLVideoElement) ? (b.videoWidth * b.videoHeight) : 0;
       return areaB - areaA;
     });
+    const last = recallLastMedia();
+    if (last && !medias.includes(last) && document.contains(last) && isCandidateMedia(last)) {
+      medias.unshift(last);
+    }
     return medias;
   }
 
   function ensureSelectionHud() {
-    if (STATE.selectHudEl) return STATE.selectHudEl;
+    if (STATE.selectHudEl) {
+      if (!STATE.selectHudEl.isConnected) document.documentElement.appendChild(STATE.selectHudEl);
+      return STATE.selectHudEl;
+    }
     const el = document.createElement('div');
     el.id = 'gmcx-select-hud';
     el.style.cssText = `position:fixed;left:50%;bottom:6%;transform:translateX(-50%);
@@ -223,12 +249,17 @@
     }
     if (STATE.selectedIndex >= STATE.videosCache.length) STATE.selectedIndex = 0;
     const el = STATE.videosCache[STATE.selectedIndex];
-    if (el && document.contains(el)) return el;
+    if (el && document.contains(el)) {
+      rememberActiveMedia(el);
+      return el;
+    }
     // 若元素已被移除，清空缓存重建
     STATE.videosCache = collectVideos();
     if (!STATE.videosCache.length) return null;
     STATE.selectedIndex = 0;
-    return STATE.videosCache[0] || null;
+    const next = STATE.videosCache[0] || null;
+    if (next) rememberActiveMedia(next);
+    return next;
   }
 
   function getMediaName(m) {
@@ -274,9 +305,18 @@
   function getActiveMedia() {
     const selected = resolveSelectedMedia();
     if (selected) return selected;
+    const pip = document.pictureInPictureElement;
+    if (pip instanceof HTMLVideoElement && document.contains(pip)) {
+      rememberActiveMedia(pip);
+      return pip;
+    }
+    const last = recallLastMedia();
+    if (last) return last;
     // 更严格的回退：与 collectVideos 同一套筛选
     const list = collectVideos();
-    return list[0] || null;
+    const candidate = list[0] || null;
+    if (candidate) rememberActiveMedia(candidate);
+    return candidate;
   }
   function ensureHud() {
     // legacy simple HUD removed; all immediate feedback uses rich overlay or select HUD
@@ -477,7 +517,10 @@
   }
 
   function ensureFineOverlay() {
-    if (STATE.fineOverlayEl) return STATE.fineOverlayEl;
+    if (STATE.fineOverlayEl) {
+      if (!STATE.fineOverlayEl.wrap.isConnected) document.documentElement.appendChild(STATE.fineOverlayEl.wrap);
+      return STATE.fineOverlayEl;
+    }
     const wrap = document.createElement('div');
     wrap.id = 'gmcx-fine-overlay';
     wrap.style.cssText = `position:fixed;left:50%;bottom:4%;transform:translateX(-50%);width:60%;max-width:760px;z-index:2147483647;

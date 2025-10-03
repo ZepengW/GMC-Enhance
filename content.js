@@ -12,6 +12,8 @@
     fineSeekTimer: null,
     fineSeekStep: 0.2, // 无级细微拖动步长（秒）
     lastMediaWeak: null,
+    mediaListenerMap: new WeakMap(), // media -> { onSeeking, onSeeked }
+    localSeeking: false, // 本地用户正在拖动/变更进度
     fineOverlayEl: null,
     overlayHideTimer: null,
     overlayHideDelay: 3000 // 毫秒
@@ -19,6 +21,12 @@
     // 进度条实时刷新
     overlayVisible: false,
     progressRafId: 0,
+    progressHighlightTimer: null,
+    progressHighlightActive: false,
+    progressHighlightPersistent: false,
+  progressBarContext: { isLive: false, preview: false },
+  overlayMedia: null,
+  overlayMediaTimeHandler: null,
     seekPreviewActive: false,
     isRemoteOverlay: false
   };
@@ -40,15 +48,43 @@
   };
   // ====== EQ 记忆（按页面） ======
   const EQMEM = { applied: false };
+  // 绑定媒体事件，以便在用户在网页端主动调整进度时，HUD 自动高亮并在结束后恢复蓝色且实时刷新
+  function ensureMediaEventBindings(media) {
+    if (!(media instanceof HTMLMediaElement)) return;
+    if (!STATE.mediaListenerMap) STATE.mediaListenerMap = new WeakMap();
+    if (STATE.mediaListenerMap.has(media)) return;
+    const onSeeking = () => {
+      STATE.localSeeking = true;
+      STATE.seekPreviewActive = true; // 处于本地“调整中”
+      STATE.isRemoteOverlay = false; // 本地操作优先，允许 RAF 刷新
+      setProgressHighlight(true, { persist: true });
+      ensureProgressTick();
+    };
+    const onSeeked = () => {
+      STATE.localSeeking = false;
+      STATE.seekPreviewActive = false;
+      setProgressHighlight(false);
+      try { updateLocalOverlay(); } catch {}
+      resetOverlayAutoHide();
+      ensureProgressTick();
+    };
+    media.addEventListener('seeking', onSeeking);
+    media.addEventListener('seeked', onSeeked);
+    STATE.mediaListenerMap.set(media, { onSeeking, onSeeked });
+  }
+
   function rememberActiveMedia(media) {
     if (!(media instanceof HTMLMediaElement)) return;
     try {
       if (typeof WeakRef !== 'undefined') {
         STATE.lastMediaWeak = new WeakRef(media);
+        // 记忆时确保已绑定事件
+        ensureMediaEventBindings(media);
         return;
       }
     } catch {}
     STATE.lastMediaWeak = media;
+    ensureMediaEventBindings(media);
   }
   function recallLastMedia() {
     const ref = STATE.lastMediaWeak;
@@ -334,8 +370,9 @@
     const cur = media.currentTime || 0;
     const durRaw = isFinite(media.duration) ? media.duration : cur + 1;
     const pct = durRaw ? (cur / durRaw) * 100 : 0;
-    el.barFill.style.width = pct.toFixed(3) + '%';
-    el.barFill.style.background = 'linear-gradient(90deg,#4facfe,#00f2fe)';
+  el.barFill.style.width = pct.toFixed(3) + '%';
+  STATE.progressBarContext = { isLive: false, preview: false };
+  applyBarFillColor(el.barFill, STATE.progressBarContext);
     el.left.textContent = formatTime(cur);
     el.right.textContent = isFinite(media.duration) ? formatTime(media.duration) : '--:--';
     // 统一使用“富卡片”布局：标题行 + 状态行
@@ -400,30 +437,31 @@
   }
   function seekBy(deltaSec) {
     const media = getActiveMedia();
-    if (!media) { showSelectHUD('未找到媒体'); return; }
+  if (!media) { showSelectHUD('未找到媒体'); return; }
     try {
       const next = media.currentTime + deltaSec;
       media.currentTime = Math.max(0, Math.min(isFinite(media.duration) ? media.duration : next, next));
       updateLocalOverlay({actionLabel: `${deltaSec>=0? '快进':'快退'} ${Math.abs(deltaSec)}s`});
+      flashProgressHighlight();
     } catch { showSelectHUD('无法快进/快退'); }
   }
   function setRate(rate) {
     const media = getActiveMedia();
-    if (!media) { showSelectHUD('未找到媒体'); return; }
+  if (!media) { showSelectHUD('未找到媒体'); return; }
     rate = Math.max(0.06, Math.min(16, rate));
     media.playbackRate = rate;
     updateLocalOverlay({actionLabel: `速度 ${rate.toFixed(2)}×`});
   }
   function adjustRate(delta) {
     const media = getActiveMedia();
-    if (!media) { showSelectHUD('未找到媒体'); return; }
+  if (!media) { showSelectHUD('未找到媒体'); return; }
     const newRate = Math.max(0.06, Math.min(16, (media.playbackRate || 1) + delta));
     media.playbackRate = newRate;
     updateLocalOverlay({actionLabel: `速度 ${newRate.toFixed(2)}×`});
   }
   function togglePlay() {
     const media = getActiveMedia();
-    if (!media) { showSelectHUD('未找到媒体'); return; }
+  if (!media) { showSelectHUD('未找到媒体'); return; }
     if (media.paused) { media.play?.(); }
     else { media.pause?.(); }
     updateLocalOverlay({actionLabel: media.paused ? '暂停' : '播放'});
@@ -473,6 +511,31 @@
       img.src = resp.dataUrl;
     });
   }
+  async function togglePictureInPicture() {
+    const media = getActiveMedia();
+    if (!(media instanceof HTMLVideoElement)) {
+      showSelectHUD('未找到可小窗的视频');
+      return { ok: false, reason: 'no-video' };
+    }
+    if (media.disablePictureInPicture || !document.pictureInPictureEnabled) {
+      showSelectHUD('当前视频不支持小窗');
+      return { ok: false, reason: 'not-supported' };
+    }
+    try {
+      if (document.pictureInPictureElement && document.pictureInPictureElement !== media) {
+        await document.exitPictureInPicture().catch(() => {});
+      }
+      if (document.pictureInPictureElement === media) {
+        await document.exitPictureInPicture();
+        return { ok: true, active: false };
+      }
+      await media.requestPictureInPicture();
+      return { ok: true, active: true };
+    } catch (err) {
+      showSelectHUD('小窗失败');
+      return { ok: false, reason: String(err && err.message || err) };
+    }
+  }
   function cycleSpeed(media) {
     if (!media) return showSelectHUD('未找到媒体');
     // 如果当前速率不在 cycleList 中，先插入
@@ -494,6 +557,7 @@
     if (STATE.fineSeekActive && STATE.fineSeekDir === dir) return;
     STATE.fineSeekActive = true;
     STATE.fineSeekDir = dir;
+    setProgressHighlight(true, { persist: true });
     const stepOnce = () => {
       const media = getActiveMedia();
       if (!media) return;
@@ -513,7 +577,16 @@
     clearInterval(STATE.fineSeekTimer);
     STATE.fineSeekActive = false;
     STATE.fineSeekDir = 0;
-    hideFineOverlay();
+    // 结束微调：不立即隐藏 HUD，而是恢复为常规（蓝色）并继续实时刷新
+    setProgressHighlight(false);
+    STATE.seekPreviewActive = false;
+    STATE.isRemoteOverlay = false;
+    // 以常规卡片样式刷新一次，并启动自动隐藏计时
+    try {
+      updateLocalOverlay();
+    } catch {}
+    resetOverlayAutoHide();
+    ensureProgressTick();
   }
 
   function ensureFineOverlay() {
@@ -526,8 +599,8 @@
     wrap.style.cssText = `position:fixed;left:50%;bottom:4%;transform:translateX(-50%);width:60%;max-width:760px;z-index:2147483647;
       background:rgba(18,20,24,.72);padding:10px 14px 14px;border-radius:16px;box-shadow:0 6px 26px rgba(0,0,0,.4);color:#fff;
       font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-size:12px;backdrop-filter:blur(10px) saturate(150%);opacity:0;transition:opacity .18s ease;pointer-events:none;`;
-    const barOuter = document.createElement('div');
-    barOuter.style.cssText = 'position:relative;width:100%;height:8px;background:rgba(255,255,255,.18);border-radius:6px;overflow:hidden;margin-top:4px;';
+  const barOuter = document.createElement('div');
+  barOuter.style.cssText = 'position:relative;width:100%;height:8px;background:rgba(255,255,255,.18);border-radius:6px;overflow:hidden;margin-top:4px;';
     const barFill = document.createElement('div');
     barFill.style.cssText = 'position:absolute;left:0;top:0;height:100%;width:0;background:linear-gradient(90deg,#4facfe,#00f2fe);transition:width .08s;';
     const label = document.createElement('div');
@@ -550,7 +623,7 @@
     wrap.appendChild(barOuter);
     wrap.appendChild(carousel);
     document.documentElement.appendChild(wrap);
-    STATE.fineOverlayEl = { wrap, barFill, left, center, right, prev, next };
+  STATE.fineOverlayEl = { wrap, barOuter, barFill, left, center, right, prev, next };
     return STATE.fineOverlayEl;
   }
   function updateFineOverlay(media) {
@@ -561,8 +634,9 @@
     const cur = media.currentTime || 0;
     const dur = isFinite(media.duration) ? media.duration : cur + 1;
     const pct = dur ? (cur / dur) * 100 : 0;
-    el.barFill.style.width = pct.toFixed(3) + '%';
-    el.barFill.style.background = 'linear-gradient(90deg,#4facfe,#00f2fe)';
+  el.barFill.style.width = pct.toFixed(3) + '%';
+  STATE.progressBarContext = { isLive: false, preview: false };
+  applyBarFillColor(el.barFill, STATE.progressBarContext);
     el.left.textContent = formatTime(cur);
     el.right.textContent = isFinite(media.duration) ? formatTime(media.duration) : '--:--';
     // 使用与卡片A一致的富卡片布局，并在标题中标注微调步长
@@ -611,6 +685,7 @@
     STATE.fineOverlayEl.wrap.style.opacity = '0';
     STATE.overlayVisible = false;
     stopProgressTick();
+    setProgressHighlight(false);
     // 通知后台覆盖层已隐藏，用于恢复到本页优先控制
     try { chrome.runtime.sendMessage({type:'gmcx-overlay-hidden'}); } catch {}
   }
@@ -623,12 +698,67 @@
     }, STATE.overlayHideDelay);
   }
 
+  function setProgressHighlight(active, options = {}) {
+    const el = STATE.fineOverlayEl || ensureFineOverlay();
+    if (!el || !el.barOuter || !el.barFill) return;
+    const ctx = STATE.progressBarContext || { isLive: false, preview: false };
+    if (active) {
+      STATE.progressHighlightActive = true;
+      STATE.progressHighlightPersistent = !!options.persist;
+      clearTimeout(STATE.progressHighlightTimer);
+      STATE.progressHighlightTimer = null;
+      el.barOuter.style.boxShadow = '0 0 18px rgba(255,184,92,0.55)';
+      el.barOuter.style.outline = '1px solid rgba(255,184,92,0.35)';
+      el.barOuter.style.outlineOffset = '0px';
+      el.barFill.style.filter = 'brightness(1.2)';
+      el.barFill.style.transition = 'width .08s, filter .18s';
+      if (!STATE.progressHighlightPersistent) {
+        const duration = Math.max(200, Number(options.duration) || 900);
+        STATE.progressHighlightTimer = setTimeout(() => {
+          STATE.progressHighlightTimer = null;
+          setProgressHighlight(false);
+        }, duration);
+      }
+    } else {
+      STATE.progressHighlightActive = false;
+      STATE.progressHighlightPersistent = false;
+      clearTimeout(STATE.progressHighlightTimer);
+      STATE.progressHighlightTimer = null;
+      el.barOuter.style.boxShadow = '';
+      el.barOuter.style.outline = '';
+      el.barOuter.style.outlineOffset = '';
+      el.barFill.style.filter = '';
+      if (el.barFill.style.transition?.includes('filter')) {
+        el.barFill.style.transition = 'width .08s';
+      }
+    }
+    applyBarFillColor(el.barFill, ctx);
+  }
+
+  function flashProgressHighlight(duration = 450) {
+    setProgressHighlight(true, { duration });
+  }
+
+  function applyBarFillColor(barFillEl, { isLive = false, preview = false } = {}) {
+    if (!barFillEl) return;
+    if (isLive) {
+      barFillEl.style.background = 'linear-gradient(90deg,#ff5252,#ff1744)';
+    } else if (preview) {
+      barFillEl.style.background = 'linear-gradient(90deg,#ffb347,#ffcc33)';
+    } else if (STATE.progressHighlightActive || STATE.fineSeekActive) {
+      barFillEl.style.background = 'linear-gradient(90deg,#ff8a3d,#ffd36b)';
+    } else {
+      barFillEl.style.background = 'linear-gradient(90deg,#4facfe,#00f2fe)';
+    }
+  }
+
   // ===== 覆盖层进度条实时刷新（绑定当前活动媒体） =====
   function progressTick() {
     STATE.progressRafId = 0;
     if (!STATE.overlayVisible) return;
     try {
-      if (!STATE.seekPreviewActive && !STATE.isRemoteOverlay) {
+      // 本地手动拖动(localSeeking)时允许实时刷新；远程预览或显式抑制时暂停本地刷新
+      if (((!STATE.seekPreviewActive) || STATE.localSeeking) && !STATE.isRemoteOverlay) {
         const media = getActiveMedia();
         if (media) {
           const el = ensureFineOverlay();
@@ -638,6 +768,8 @@
           el.barFill.style.width = pct.toFixed(3) + '%';
           el.left.textContent = formatTime(cur);
           el.right.textContent = isFinite(media.duration) ? formatTime(media.duration) : '--:--';
+          STATE.progressBarContext = { isLive: false, preview: false };
+          applyBarFillColor(el.barFill, STATE.progressBarContext);
         }
       }
     } catch {}
@@ -766,7 +898,8 @@
         }
       }
   // 标记远程覆盖层状态（用于抑制本地 RAF 进度）
-  STATE.isRemoteOverlay = !!p.isRemote;
+  // 仅在“预览”阶段阻止本地 RAF，最终/同步状态恢复本地 RAF
+  STATE.isRemoteOverlay = !!p.preview;
   const el = ensureFineOverlay();
   el.wrap.style.opacity = '1';
   STATE.overlayVisible = true;
@@ -830,13 +963,22 @@
       // Live 流：不显示预览偏移，左侧只显示当前；点播：预览显示目标
       // 预览态下不让 RAF 覆盖进度；提交/同步后恢复 RAF
       STATE.seekPreviewActive = !!p.preview;
+      if (!p.isLive) {
+        if (STATE.seekPreviewActive) {
+          setProgressHighlight(true, { persist: true });
+        } else if (!STATE.fineSeekActive) {
+          setProgressHighlight(false);
+        }
+      } else if (!STATE.fineSeekActive) {
+        setProgressHighlight(false);
+      }
       const leftLabel = (p.isLive ? (p.currentTime || '--:--') : (p.preview && typeof p.previewSeconds === 'number' ? formatTime(p.previewSeconds) : (p.currentTime || '--:--')));
       el.left.textContent = leftLabel;
       el.right.textContent = (p.isLive ? '直播' : (p.duration || '--:--'));
-      const percent = Math.max(0, Math.min(100, p.percent || 0));
-      el.barFill.style.width = percent.toFixed(3) + '%';
-      // live 使用红色风格
-      el.barFill.style.background = p.isLive ? 'linear-gradient(90deg,#ff5252,#ff1744)' : (p.preview ? 'linear-gradient(90deg,#ffb347,#ffcc33)' : 'linear-gradient(90deg,#4facfe,#00f2fe)');
+  const percent = Math.max(0, Math.min(100, p.percent || 0));
+  el.barFill.style.width = percent.toFixed(3) + '%';
+  STATE.progressBarContext = { isLive: !!p.isLive, preview: !!p.preview && !p.isLive };
+  applyBarFillColor(el.barFill, STATE.progressBarContext);
       // 预览阶段：在下方左右区显示原位/目标标签
       if (p.preview && !p.isLive) {
         if (el.prev) { el.prev.textContent = `原位 ${p.currentTime || '--:--'}`; el.prev.style.display='block'; }
@@ -859,10 +1001,10 @@
     if (msg?.type === 'gmcx-mute-media') { const media = getActiveMedia(); if (media) { media.muted = true; if (!msg.silent) showOverlayForMedia(media, '静音'); } sendResponse({ok:true}); return; }
     if (msg?.type === 'gmcx-unmute-media') { const media = getActiveMedia(); if (media) { media.muted = false; if (!msg.silent) showOverlayForMedia(media, '取消静音'); } sendResponse({ok:true}); return; }
     if (msg?.type === 'gmcx-set-media-volume') { const media = getActiveMedia(); if (media) { const vol = Math.min(1, Math.max(0, Number(msg.value))); media.volume = vol; if (vol > 0 && media.muted) media.muted = false; if (!msg.silent) showOverlayForMedia(media, `音量 ${(vol*100).toFixed(0)}%`);} sendResponse({ok:true}); return; }
-    if (msg?.type === 'gmcx-seek-media') { const media = getActiveMedia(); if (media && isFinite(media.duration)) { const delta = Number(msg.value) || 0; media.currentTime = Math.max(0, Math.min(media.duration, media.currentTime + delta)); if (!msg.silent) showOverlayForMedia(media, `${delta>=0? '快进':'快退'} ${Math.abs(delta)}s`);} sendResponse({ ok: true }); return; }
+  if (msg?.type === 'gmcx-seek-media') { const media = getActiveMedia(); if (media && isFinite(media.duration)) { const delta = Number(msg.value) || 0; media.currentTime = Math.max(0, Math.min(media.duration, media.currentTime + delta)); if (!msg.silent) { showOverlayForMedia(media, `${delta>=0? '快进':'快退'} ${Math.abs(delta)}s`); flashProgressHighlight(); } } sendResponse({ ok: true }); return; }
     if (msg?.type === 'gmcx-set-media-speed') { const media = getActiveMedia(); if (media) { media.playbackRate = Number(msg.value); if (!msg.silent) showOverlayForMedia(media, `速度 ${media.playbackRate.toFixed(2)}×`);} sendResponse({ ok: true }); return; }
     if (msg?.type === 'gmcx-reset-media') { const media = getActiveMedia(); if (media) { media.currentTime = 0; media.playbackRate = 1.0; if (!msg.silent) showOverlayForMedia(media, '重置'); } sendResponse({ ok: true }); return; }
-    if (msg?.type === 'gmcx-set-media-currentTime') { const media = getActiveMedia(); if (media && isFinite(media.duration)) { const target = Math.max(0, Math.min(media.duration, Number(msg.value))); media.currentTime = target; if (!msg.silent) showOverlayForMedia(media, `跳转 ${formatTime(target)}`); } sendResponse({ ok: true }); return; }
+  if (msg?.type === 'gmcx-set-media-currentTime') { const media = getActiveMedia(); if (media && isFinite(media.duration)) { const target = Math.max(0, Math.min(media.duration, Number(msg.value))); media.currentTime = target; if (!msg.silent) { showOverlayForMedia(media, `跳转 ${formatTime(target)}`); flashProgressHighlight(); } } sendResponse({ ok: true }); return; }
     // 4) EQ 消息处理
     if (msg?.type === 'gmcx-eq-init') { loadCustomPresets(() => { const media = getActiveMedia(); if (!media) { sendResponse({ok:false}); return; } ensureMediaEQ(media); const gains = (EQ.sourceMap.get(media)?.filters || []).map(f => f.gain.value); sendResponse({ok:true, freqs: EQ.freqs, gains, builtin: EQ.builtinPresets, custom: EQ.customPresets}); }); return true; }
     if (msg?.type === 'gmcx-eq-get-state') { const media = getActiveMedia(); if (!media) { sendResponse({ok:false}); return; } const entry = ensureMediaEQ(media); const gains = entry ? entry.filters.map(f => f.gain.value) : EQ.freqs.map(()=>0); sendResponse({ok:true, gains}); try { const modified = gains.some(v => Math.abs(Number(v)||0) > 0.0001); chrome.runtime.sendMessage({ type: 'gmcx-eq-modified-state', modified }); } catch {} return; }
@@ -885,13 +1027,19 @@
       }
   const type = media instanceof HTMLVideoElement ? 'video' : 'audio';
   const isLive = !isFinite(media.duration);
+  const inPiP = document.pictureInPictureElement === media;
+  const pipSupported = !!(document.pictureInPictureEnabled && media instanceof HTMLVideoElement && !media.disablePictureInPicture);
       const paused = !!media.paused;
       const currentTime = formatTime(media.currentTime);
       const duration = formatTime(media.duration);
       let thumbnail = '';
       if (type === 'video') { thumbnail = media.poster || ''; }
-      sendResponse({ ok: true, type, isLive, paused, currentTime, duration, rawCurrentTime: media.currentTime, rawDuration: media.duration, playbackRate: media.playbackRate, thumbnail, muted: media.muted, volume: media.volume });
+      sendResponse({ ok: true, type, isLive, paused, currentTime, duration, rawCurrentTime: media.currentTime, rawDuration: media.duration, playbackRate: media.playbackRate, thumbnail, muted: media.muted, volume: media.volume, inPictureInPicture: inPiP, pictureInPictureEnabled: pipSupported });
       return;
+    }
+    if (msg?.type === 'gmcx-toggle-pip') {
+      togglePictureInPicture().then((res) => sendResponse && sendResponse(res || { ok: false })).catch(() => sendResponse && sendResponse({ ok: false }));
+      return true;
     }
   });
 })();

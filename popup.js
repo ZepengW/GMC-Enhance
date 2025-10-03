@@ -94,12 +94,17 @@ function renderMediaList(mediaList) {
     }
   // 控件区
     const isLive = !!info.isLive;
+  const pipSupported = info.type === 'video' && info.pictureInPictureEnabled;
+  const pipActive = !!info.inPictureInPicture;
+  const pipButtonTitle = pipSupported ? (pipActive ? '退出小窗播放' : '开启小窗播放') : '当前媒体不支持小窗';
+  const pipLabel = pipActive ? '🪟' : '📺';
     card.innerHTML = `
       <div class="media-header">
         ${thumbHtml}
         <span class="media-type">${info.type === 'video' ? '🎬 视频' : '🎵 音频'}</span>
         ${isLive ? '<span class="media-live">LIVE</span>' : ''}
         <span class="media-state">${info.paused ? '⏸ 暂停' : '▶ 播放'}</span>
+        <button class="media-btn media-pip${pipActive ? ' pip-active' : ''}" title="${pipButtonTitle}" ${pipSupported ? '' : 'disabled'}>${pipLabel}</button>
         <button class="media-btn media-jump" title="切换到该标签页">↗️</button>
       </div>
       <div class="media-title" title="${tab.title}">${formatTabTitle(tab)}</div>
@@ -236,8 +241,10 @@ function renderMediaList(mediaList) {
   }
     // 静音切换
     // 音量与静音
-    const volIcon = card.querySelector('.vol-icon');
-    const volSlider = card.querySelector('.media-volume');
+  const volIcon = card.querySelector('.vol-icon');
+  const volSlider = card.querySelector('.media-volume');
+  const pipBtn = card.querySelector('.media-pip');
+  if (pipBtn) pipBtn.dataset.busy = pipBtn.dataset.busy || '0';
     if (volIcon) {
       volIcon.addEventListener('click', async () => {
         await chrome.runtime.sendMessage({ type: 'gmcx-control', action: 'toggle-mute', tabId: tab.id });
@@ -253,6 +260,20 @@ function renderMediaList(mediaList) {
           await chrome.runtime.sendMessage({ type: 'gmcx-control', action: 'set-volume', tabId: tab.id, value: v });
           refreshMediaList(false);
         }, 120);
+      });
+    }
+    if (pipBtn) {
+      pipBtn.addEventListener('click', async () => {
+        if (pipBtn.dataset.busy === '1') return;
+        pipBtn.dataset.busy = '1';
+        pipBtn.disabled = true;
+        try {
+          await chrome.runtime.sendMessage({ type: 'gmcx-control', action: 'toggle-pip', tabId: tab.id });
+        } finally {
+          pipBtn.dataset.busy = '0';
+          pipBtn.disabled = false;
+          refreshMediaList(false);
+        }
       });
     }
     // EQ 面板逻辑
@@ -625,10 +646,19 @@ async function refreshMediaList(full = false) {
       if (playBtn) playBtn.textContent = info.paused ? '▶' : '⏸';
       const stateEl = card.querySelector('.media-state');
       if (stateEl) stateEl.textContent = info.paused ? '⏸ 暂停' : '▶ 播放';
-  const volIcon = card.querySelector('.vol-icon');
-  const volSlider = card.querySelector('.media-volume');
-  if (volIcon) volIcon.textContent = info.muted ? '🔇' : '🔊';
-  if (volSlider && !seekLocks.has(String(tab.id))) volSlider.value = info.volume != null ? info.volume : 1;
+      const pipBtn = card.querySelector('.media-pip');
+      if (pipBtn) {
+        const supported = info.type === 'video' && info.pictureInPictureEnabled;
+        pipBtn.disabled = !supported;
+        pipBtn.title = supported ? (info.inPictureInPicture ? '退出小窗播放' : '开启小窗播放') : '当前媒体不支持小窗';
+        pipBtn.classList.toggle('pip-active', !!info.inPictureInPicture);
+        pipBtn.textContent = info.inPictureInPicture ?  '🪟' : '📺';
+        pipBtn.dataset.busy = '0';
+      }
+      const volIcon = card.querySelector('.vol-icon');
+      const volSlider = card.querySelector('.media-volume');
+      if (volIcon) volIcon.textContent = info.muted ? '🔇' : '🔊';
+      if (volSlider && !seekLocks.has(String(tab.id))) volSlider.value = info.volume != null ? info.volume : 1;
       // 倍速显示
       const speedSelect = card.querySelector('.media-speed');
       if (speedSelect) {

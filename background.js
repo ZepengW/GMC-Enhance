@@ -762,6 +762,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           playbackRate: info.playbackRate,
           volume: info.volume,
           muted: info.muted,
+          inPictureInPicture: info.inPictureInPicture,
           controlledTabId: tid
         });
       };
@@ -798,6 +799,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           const after = await getInfo();
           pushOverlay(after, 'speed-set');
           sendResponse && sendResponse({ ok:true }); return;
+        }
+        if (action === 'toggle-pip') {
+          const resp = await sendToTab(tid, { type: 'gmcx-toggle-pip' });
+          const after = await getInfo();
+          if (after && after.ok) {
+            entry.info = after;
+          }
+          sendResponse && sendResponse({ ok: !!(resp && resp.ok), active: resp && resp.active });
+          return;
         }
         if (action === 'set-volume') {
           await sendToTab(tid, {type:'gmcx-set-media-volume', value: Math.max(0, Math.min(1, Number(value) || 0)), silent:true});

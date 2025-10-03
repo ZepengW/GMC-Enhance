@@ -144,8 +144,14 @@ function renderMediaList(mediaList) {
           <button class="media-btn eq-save" style="font-size:12px;">保存</button>
           <button class="media-btn eq-del" style="font-size:12px;display:none;">删除</button>
           <button class="media-btn eq-reset" style="font-size:12px;">恢复原始音效</button>
+          <button class="media-btn eq-spectrum-toggle" title="显示/隐藏频谱（按频段能量）" style="font-size:12px;">🌈 频谱</button>
         </div>
         <div class="eq-bands" style="display:flex;gap:8px;justify-content:space-between;">
+        </div>
+        <div class="eq-spectrum" style="display:none;margin-top:10px;padding:6px 4px;background:#fafbff;border:1px solid #e8ecf5;border-radius:8px;">
+          <div class="eq-spectrum-bars" style="display:flex;align-items:flex-end;gap:6px;height:64px;">
+          </div>
+          <div class="eq-spectrum-labels" style="display:flex;justify-content:space-between;gap:6px;font-size:10px;color:#666;margin-top:4px;"></div>
         </div>
       </div>
     `;
@@ -284,7 +290,11 @@ function renderMediaList(mediaList) {
     const eqSaveName = card.querySelector('.eq-save-name');
     const eqSaveBtn = card.querySelector('.eq-save');
     const eqDelBtn = card.querySelector('.eq-del');
-    const eqResetBtn = card.querySelector('.eq-reset');
+  const eqResetBtn = card.querySelector('.eq-reset');
+  const eqSpectrumToggle = card.querySelector('.eq-spectrum-toggle');
+  const eqSpectrumWrap = card.querySelector('.eq-spectrum');
+  const eqSpectrumBars = card.querySelector('.eq-spectrum-bars');
+  const eqSpectrumLabels = card.querySelector('.eq-spectrum-labels');
     let eqGains = [];
     let eqFreqs = [];
     let eqBuiltin = [];
@@ -358,6 +368,42 @@ function renderMediaList(mediaList) {
         eqBandsWrap.appendChild(col);
       });
     }
+      function renderSpectrumLabels() {
+        if (!eqSpectrumLabels) return;
+        eqSpectrumLabels.innerHTML = '';
+        eqFreqs.forEach((f) => {
+          const lab = document.createElement('div');
+          lab.style.cssText = 'flex:1;text-align:center;';
+          lab.textContent = f>=1000 ? (f/1000)+'k' : f;
+          eqSpectrumLabels.appendChild(lab);
+        });
+      }
+      function ensureSpectrumBars() {
+        if (!eqSpectrumBars) return;
+        if (eqSpectrumBars.childElementCount === eqFreqs.length) return;
+        eqSpectrumBars.innerHTML = '';
+        eqFreqs.forEach(() => {
+          const bar = document.createElement('div');
+          bar.style.cssText = 'flex:1;min-width:8px;background:linear-gradient(180deg,#4facfe,#00f2fe);border-radius:4px 4px 0 0;height:6px;transition:height .08s ease, filter .12s ease';
+          eqSpectrumBars.appendChild(bar);
+        });
+      }
+      let spectrumTimer = null;
+      async function spectrumTick() {
+        try {
+          const sample = await sendToTab(tab.id, { type: 'gmcx-eq-spectrum-sample' });
+          if (!sample || !sample.ok || !Array.isArray(sample.bands)) return;
+          ensureSpectrumBars();
+          const bars = Array.from(eqSpectrumBars.children);
+          sample.bands.forEach((v, i) => {
+            const h = Math.max(4, Math.min(62, Math.round(v * 62))); // 0..1 -> px
+            const el = bars[i];
+            if (el) el.style.height = h + 'px';
+          });
+        } finally {
+          spectrumTimer = setTimeout(spectrumTick, 120);
+        }
+      }
     async function loadEQ() {
       const resp = await sendToTab(tab.id, {type:'gmcx-eq-init'});
       if (!resp || !resp.ok) return;
@@ -400,6 +446,8 @@ function renderMediaList(mediaList) {
         eqSaveName.value = '';
       }
       renderBands();
+      // 初始化频谱标签（不自动显示）
+      renderSpectrumLabels();
     }
     eqToggle.addEventListener('click', async ()=>{
       if (eqPanel.style.display==='none') { eqPanel.style.display='block'; await loadEQ(); }
@@ -469,6 +517,26 @@ function renderMediaList(mediaList) {
         setEqButtonTint(false);
         // 请求后台刷新图标
         chrome.runtime.sendMessage({ type: 'gmcx-update-icon-for-tab', tabId: tab.id });
+      });
+    }
+    if (eqSpectrumToggle && eqSpectrumWrap) {
+      eqSpectrumToggle.addEventListener('click', async () => {
+        if (eqSpectrumWrap.style.display === 'none') {
+          // 尝试初始化分析器
+          const ok = await sendToTab(tab.id, { type: 'gmcx-eq-spectrum-init' });
+          if (!ok || !ok.ok) return;
+          eqSpectrumWrap.style.display = 'block';
+          renderSpectrumLabels();
+          ensureSpectrumBars();
+          clearTimeout(spectrumTimer);
+          await spectrumTick();
+          eqSpectrumToggle.textContent = '🌈 频谱';
+        } else {
+          eqSpectrumWrap.style.display = 'none';
+          clearTimeout(spectrumTimer);
+          spectrumTimer = null;
+          eqSpectrumToggle.textContent = '🌈 频谱';
+        }
       });
     }
     // 倍速选择

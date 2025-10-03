@@ -33,7 +33,7 @@
   // ====== EQ 状态 ======
   const EQ = {
     ctx: null,
-    sourceMap: new WeakMap(), // media -> {source, filters:[], gains:[]}
+    sourceMap: new WeakMap(), // media -> {source, filters:[], analyser?, fftBuf?}
     freqs: [60,170,400,1000,2500,6000,15000],
     ranges: { min: -24, max: 24 },
     builtinPresets: [
@@ -44,7 +44,9 @@
       { name: '影院', gains: [6,4,2,0,1,3,5] }
     ],
     customPresets: [],
-    loadedCustom: false
+    loadedCustom: false,
+    analyserFftSize: 2048,
+    analyserSmoothing: 0.75
   };
   // ====== EQ 记忆（按页面） ======
   const EQMEM = { applied: false };
@@ -142,11 +144,49 @@
         biquad.gain.value = 0;
         return biquad;
       });
-      // 串联
-      filters.reduce((prev, cur) => { prev.connect(cur); return cur; }, source).connect(ctx.destination);
-      entry = { source, filters };
+      // 串联，并在末端挂接 Analyser，用于频谱可视化
+      const lastNode = filters.reduce((prev, cur) => { prev.connect(cur); return cur; }, source);
+      let analyser = null, fftBuf = null;
+      try {
+        analyser = ctx.createAnalyser();
+        analyser.fftSize = EQ.analyserFftSize;
+        analyser.smoothingTimeConstant = EQ.analyserSmoothing;
+        fftBuf = new Uint8Array(analyser.frequencyBinCount);
+        lastNode.connect(analyser);
+        analyser.connect(ctx.destination);
+      } catch {
+        // 若创建失败，直接连到目的地
+        lastNode.connect(ctx.destination);
+      }
+      entry = { source, filters, analyser, fftBuf };
       EQ.sourceMap.set(media, entry);
       return entry;
+    } catch { return null; }
+  }
+
+  // 计算每个 EQ 频段的能量（0..1），通过分析器频谱数据做近邻平均
+  function getPerBandAmplitudes(media) {
+    const ctx = ensureEQContext();
+    if (!ctx) return null;
+    const entry = ensureMediaEQ(media);
+    if (!entry || !entry.analyser || !entry.fftBuf) return null;
+    try {
+      entry.analyser.getByteFrequencyData(entry.fftBuf);
+      const nyquist = ctx.sampleRate / 2;
+      const bins = entry.fftBuf.length; // frequencyBinCount
+      const data = entry.fftBuf;
+      const bandVals = EQ.freqs.map((freq) => {
+        const idx = Math.max(0, Math.min(bins - 1, Math.round(freq / nyquist * (bins - 1))));
+        // 平均 idx 附近的窗口，提升稳定性
+        let sum = 0, count = 0;
+        const win = 2;
+        for (let k = idx - win; k <= idx + win; k++) {
+          if (k >= 0 && k < bins) { sum += data[k]; count++; }
+        }
+        const avg = count ? (sum / count) : 0;
+        return Math.max(0, Math.min(1, avg / 255));
+      });
+      return bandVals;
     } catch { return null; }
   }
   function applyGains(media, gains) {
@@ -1014,6 +1054,23 @@
     if (msg?.type === 'gmcx-eq-clear-page') { clearEQForPage(() => sendResponse({ok:true})); return true; }
     if (msg?.type === 'gmcx-eq-save-preset') { const media = getActiveMedia(); if (!media) { sendResponse({ok:false}); return; } const entry = ensureMediaEQ(media); if (!entry) { sendResponse({ok:false}); return; } const gains = entry.filters.map(f => f.gain.value); loadCustomPresets(() => { const name = String(msg.name || '').trim().slice(0,40) || ('Preset'+Date.now()); const existIdx = EQ.customPresets.findIndex(p => p.name === name); if (existIdx >= 0) EQ.customPresets[existIdx] = {name, gains}; else EQ.customPresets.push({name, gains}); saveCustomPresets(); sendResponse({ok:true, name}); }); return true; }
     if (msg?.type === 'gmcx-eq-delete-preset') { loadCustomPresets(() => { const name = msg.name; const before = EQ.customPresets.length; EQ.customPresets = EQ.customPresets.filter(p => p.name !== name); if (EQ.customPresets.length !== before) saveCustomPresets(); sendResponse({ok:true}); }); return true; }
+    // 4.1) EQ 频谱可视化：初始化（确保分析器）与取样
+    if (msg?.type === 'gmcx-eq-spectrum-init') {
+      const media = getActiveMedia();
+      if (!media) { sendResponse({ ok: false }); return; }
+      const entry = ensureMediaEQ(media);
+      if (!entry) { sendResponse({ ok:false }); return; }
+      sendResponse({ ok: true, freqs: EQ.freqs });
+      return;
+    }
+    if (msg?.type === 'gmcx-eq-spectrum-sample') {
+      const media = getActiveMedia();
+      if (!media) { sendResponse({ ok: false }); return; }
+      const arr = getPerBandAmplitudes(media);
+      if (!arr) { sendResponse({ ok: false }); return; }
+      sendResponse({ ok: true, bands: arr });
+      return;
+    }
     // 5) 全局媒体探测（供后台扫描使用）
   if (msg?.type === 'gmcx-get-media-info') {
       const blacklist = ['https://www.bilibili.com/','https://www.douyu.com/'];

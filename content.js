@@ -34,20 +34,25 @@
   const EQ = {
     ctx: null,
     sourceMap: new WeakMap(), // media -> {source, filters:[], analyser?, fftBuf?}
+    entries: new Set(), // 可迭代保存的链路集合（WeakMap 不可遍历，用于批量更新 Q）
     // 使用 10 段常用频点
     freqs: [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000],
     ranges: { min: -24, max: 24 },
+    // 全局可调带宽(Q) —— 用户可在弹窗中调节；范围约束防止过宽或过窄导致失真/过度重叠
+    currentQ: 0.85, // 初始默认（之前固定值）
+    qRange: { min: 0.3, max: 2.0 },
     builtinPresets: [
-      { name: '原始', gains: [0,0,0,0,0,0,0,0,0,0] },
-      { name: '低音增强', gains: [6,5,4,2,1,0,-1,-2,-3,-4] },
-      { name: '人声增强', gains: [-3,-2,-1,0,1,3,2,1,0,-1] },
-      { name: '高音增强', gains: [-5,-4,-3,-2,-1,0,2,4,6,7] },
-      { name: '影院', gains: [4,3,2,1,0,0,1,2,3,4] }
+      { name: '原始', gains: [0,0,0,0,0,0,0,0,0,0], q: 0.85 },
+      { name: '低音增强', gains: [6,5,4,2,1,0,-1,-2,-3,-4], q: 0.9 },
+      { name: '人声增强', gains: [-3,-2,-1,0,1,3,2,1,0,-1], q: 1.0 },
+      { name: '高音增强', gains: [-5,-4,-3,-2,-1,0,2,4,6,7], q: 1.1 },
+      { name: '影院', gains: [4,3,2,1,0,0,1,2,3,4], q: 0.8 }
     ],
     customPresets: [],
     loadedCustom: false,
     analyserFftSize: 2048,
-    analyserSmoothing: 0.5
+    analyserSmoothing: 0.5,
+    loadedQ: false
   };
   // ====== EQ 记忆（按页面） ======
   const EQMEM = { applied: false };
@@ -142,6 +147,23 @@
     const key = getEQMemKey();
     try { chrome.storage.local.remove([key], () => cb && cb()); } catch { cb && cb(); }
   }
+  // ====== 全局 Q 读写（sync）======
+  function loadGlobalQ(cb){
+    if (EQ.loadedQ) { cb && cb(EQ.currentQ); return; }
+    try {
+      chrome.storage.sync.get({ eqGlobalQ: EQ.currentQ }, (obj) => {
+        const v = Number(obj.eqGlobalQ);
+        if (isFinite(v) && v >= EQ.qRange.min && v <= EQ.qRange.max) {
+          EQ.currentQ = v;
+        }
+        EQ.loadedQ = true;
+        cb && cb(EQ.currentQ);
+      });
+    } catch { EQ.loadedQ = true; cb && cb(EQ.currentQ); }
+  }
+  function saveGlobalQ(v, cb){
+    try { chrome.storage.sync.set({ eqGlobalQ: v }, () => cb && cb()); } catch { cb && cb(); }
+  }
   function ensureEQContext() {
     if (!EQ.ctx) {
       try { EQ.ctx = new (window.AudioContext || window.webkitAudioContext)(); }
@@ -160,7 +182,10 @@
         const biquad = ctx.createBiquadFilter();
         biquad.type = 'peaking';
         biquad.frequency.value = f;
-        biquad.Q.value = 1.05;
+        // 使用当前全局 Q（可被用户调节）
+        // 注意：只有当 gain != 0 时该滤波器才会在幅频曲线上体现；Q 决定“带宽/陡峭度”。
+        // 若所有增益为 0，调节 Q 不会有任何可听 / 可视变化（曲线仍为平直 0dB）。
+        biquad.Q.value = EQ.currentQ;
         biquad.gain.value = 0;
         return biquad;
       });
@@ -188,6 +213,7 @@
       }
         entry = { source, filters, analyserPre, fftBufPre, analyserPost, fftBufPost };
       EQ.sourceMap.set(media, entry);
+      try { EQ.entries.add(entry); } catch {}
       return entry;
     } catch { return null; }
   }
@@ -298,7 +324,7 @@
       if (Array.isArray(cfg.eqCustomPresets)) {
         EQ.customPresets = cfg.eqCustomPresets
           .filter(p => Array.isArray(p.gains))
-          .map(p => ({ name: p.name, gains: adaptGainsToCurrent(p.gains) }))
+          .map(p => ({ name: p.name, gains: adaptGainsToCurrent(p.gains), q: (isFinite(p.q)? p.q : undefined) }))
           .filter(p => p.gains.length === EQ.freqs.length);
       }
       EQ.loadedCustom = true;
@@ -1120,14 +1146,47 @@
     if (msg?.type === 'gmcx-reset-media') { const media = getActiveMedia(); if (media) { media.currentTime = 0; media.playbackRate = 1.0; if (!msg.silent) showOverlayForMedia(media, '重置'); } sendResponse({ ok: true }); return; }
   if (msg?.type === 'gmcx-set-media-currentTime') { const media = getActiveMedia(); if (media && isFinite(media.duration)) { const target = Math.max(0, Math.min(media.duration, Number(msg.value))); media.currentTime = target; if (!msg.silent) { showOverlayForMedia(media, `跳转 ${formatTime(target)}`); flashProgressHighlight(); } } sendResponse({ ok: true }); return; }
     // 4) EQ 消息处理
-    if (msg?.type === 'gmcx-eq-init') { loadCustomPresets(() => { const media = getActiveMedia(); if (!media) { sendResponse({ok:false}); return; } ensureMediaEQ(media); const gains = (EQ.sourceMap.get(media)?.filters || []).map(f => f.gain.value); sendResponse({ok:true, freqs: EQ.freqs, gains, builtin: EQ.builtinPresets, custom: EQ.customPresets}); }); return true; }
+    if (msg?.type === 'gmcx-eq-init') { loadCustomPresets(() => { loadGlobalQ(()=>{ const media = getActiveMedia(); if (!media) { sendResponse({ok:false}); return; } ensureMediaEQ(media); const gains = (EQ.sourceMap.get(media)?.filters || []).map(f => f.gain.value); sendResponse({ok:true, freqs: EQ.freqs, gains, builtin: EQ.builtinPresets, custom: EQ.customPresets, q: EQ.currentQ}); }); }); return true; }
     if (msg?.type === 'gmcx-eq-get-state') { const media = getActiveMedia(); if (!media) { sendResponse({ok:false}); return; } const entry = ensureMediaEQ(media); const gains = entry ? entry.filters.map(f => f.gain.value) : EQ.freqs.map(()=>0); sendResponse({ok:true, gains}); try { const modified = gains.some(v => Math.abs(Number(v)||0) > 0.0001); chrome.runtime.sendMessage({ type: 'gmcx-eq-modified-state', modified }); } catch {} return; }
     if (msg?.type === 'gmcx-eq-set-band') { const media = getActiveMedia(); if (!media) { sendResponse({ok:false}); return; } const entry = ensureMediaEQ(media); if (!entry) { sendResponse({ok:false}); return; } const { index, value } = msg; if (typeof index === 'number' && entry.filters[index]) { const v = Math.max(EQ.ranges.min, Math.min(EQ.ranges.max, Number(value))); entry.filters[index].gain.value = v; const gainsNow = entry.filters.map(f => f.gain.value); saveEQForPage(gainsNow); try { const modified = gainsNow.some(x => Math.abs(Number(x)||0) > 0.0001); chrome.runtime.sendMessage({ type: 'gmcx-eq-modified-state', modified }); } catch {} } sendResponse({ok:true}); return; }
-    if (msg?.type === 'gmcx-eq-apply-preset') { const media = getActiveMedia(); if (!media) { sendResponse({ok:false}); return; } const name = msg.name; loadCustomPresets(() => { const preset = [...EQ.builtinPresets, ...EQ.customPresets].find(p => p.name === name); if (!preset) { sendResponse({ok:false}); return; } applyGains(media, preset.gains); saveEQForPage(preset.gains); try { const modified = preset.gains.some(v => Math.abs(Number(v)||0) > 0.0001); chrome.runtime.sendMessage({ type: 'gmcx-eq-modified-state', modified }); } catch {} sendResponse({ok:true}); }); return true; }
+  if (msg?.type === 'gmcx-eq-apply-preset') { const media = getActiveMedia(); if (!media) { sendResponse({ok:false}); return; } const name = msg.name; loadCustomPresets(() => { const preset = [...EQ.builtinPresets, ...EQ.customPresets].find(p => p.name === name); if (!preset) { sendResponse({ok:false}); return; } applyGains(media, preset.gains); saveEQForPage(preset.gains); if (isFinite(preset.q)) { const newQ = Math.max(EQ.qRange.min, Math.min(EQ.qRange.max, Number(preset.q))); if (newQ !== EQ.currentQ) { EQ.currentQ = newQ; try { EQ.entries.forEach(e => e.filters.forEach(f=>{ try { f.Q.value = newQ; } catch {}})); } catch {} saveGlobalQ(newQ, ()=>{}); } } try { const modified = preset.gains.some(v => Math.abs(Number(v)||0) > 0.0001); chrome.runtime.sendMessage({ type: 'gmcx-eq-modified-state', modified }); } catch {} sendResponse({ok:true, q: EQ.currentQ}); }); return true; }
     if (msg?.type === 'gmcx-eq-reset') { const media = getActiveMedia(); if (!media) { sendResponse({ok:false}); return; } const zero = EQ.freqs.map(()=>0); if (applyGains(media, zero)) { saveEQForPage(zero); try { chrome.runtime.sendMessage({ type: 'gmcx-eq-modified-state', modified: false }); } catch {} sendResponse({ok:true}); } else { sendResponse({ok:false}); } return; }
     if (msg?.type === 'gmcx-eq-clear-page') { clearEQForPage(() => sendResponse({ok:true})); return true; }
-    if (msg?.type === 'gmcx-eq-save-preset') { const media = getActiveMedia(); if (!media) { sendResponse({ok:false}); return; } const entry = ensureMediaEQ(media); if (!entry) { sendResponse({ok:false}); return; } const gains = entry.filters.map(f => f.gain.value); loadCustomPresets(() => { const name = String(msg.name || '').trim().slice(0,40) || ('Preset'+Date.now()); const existIdx = EQ.customPresets.findIndex(p => p.name === name); if (existIdx >= 0) EQ.customPresets[existIdx] = {name, gains}; else EQ.customPresets.push({name, gains}); saveCustomPresets(); sendResponse({ok:true, name}); }); return true; }
+    if (msg?.type === 'gmcx-eq-save-preset') { const media = getActiveMedia(); if (!media) { sendResponse({ok:false}); return; } const entry = ensureMediaEQ(media); if (!entry) { sendResponse({ok:false}); return; } const gains = entry.filters.map(f => f.gain.value); const q = EQ.currentQ; loadCustomPresets(() => { let name = String(msg.name || '').trim().slice(0,40); if (!name) { // 生成 未命名-N
+        const base = '未命名-';
+        let maxN = 0; EQ.customPresets.forEach(p => { const m = new RegExp('^'+base+'(\\d+)$').exec(p.name); if (m) { const n = Number(m[1]); if (n>maxN) maxN = n; } });
+        name = base + (maxN+1);
+      }
+      const existIdx = EQ.customPresets.findIndex(p => p.name === name); if (existIdx >= 0) EQ.customPresets[existIdx] = {name, gains, q}; else EQ.customPresets.push({name, gains, q}); saveCustomPresets(); sendResponse({ok:true, name, q}); }); return true; }
     if (msg?.type === 'gmcx-eq-delete-preset') { loadCustomPresets(() => { const name = msg.name; const before = EQ.customPresets.length; EQ.customPresets = EQ.customPresets.filter(p => p.name !== name); if (EQ.customPresets.length !== before) saveCustomPresets(); sendResponse({ok:true}); }); return true; }
+    // 全局 Q 获取/设置
+    if (msg?.type === 'gmcx-eq-get-q') { loadGlobalQ(()=>{ sendResponse({ ok:true, q: EQ.currentQ }); }); return true; }
+    if (msg?.type === 'gmcx-eq-set-q') {
+      const raw = Number(msg.value);
+      if (!isFinite(raw)) { sendResponse({ ok:false }); return; }
+      const q = Math.max(EQ.qRange.min, Math.min(EQ.qRange.max, raw));
+      EQ.currentQ = q;
+      // 更新所有已创建的滤波器
+      try {
+        // WeakMap 不可枚举；使用 EQ.entries 追踪已创建链路
+        if (EQ.entries && EQ.entries.size) {
+          EQ.entries.forEach(entry => {
+            if (entry && Array.isArray(entry.filters)) {
+              entry.filters.forEach(f => { try { f.Q.value = q; } catch {} });
+            }
+          });
+        }
+      } catch {}
+      saveGlobalQ(q, ()=>{ sendResponse({ ok:true, q }); });
+      return true;
+    }
+    if (msg?.type === 'gmcx-eq-debug-q') {
+      const media = getActiveMedia();
+      const entry = media ? ensureMediaEQ(media) : null;
+      const filterQs = entry && Array.isArray(entry.filters) ? entry.filters.map(f => { try { return f.Q.value; } catch { return null; } }) : [];
+      sendResponse({ ok:true, currentQ: EQ.currentQ, filters: filterQs });
+      return true;
+    }
     // 4.1) EQ 频谱可视化：初始化（确保分析器）与取样
     if (msg?.type === 'gmcx-eq-spectrum-init') {
       const media = getActiveMedia();

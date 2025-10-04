@@ -7,6 +7,8 @@ Unified Control · Powerful Shortcuts · Independent Tab Sessions
 
 Global Media Control (GMC)-Enhance is a Chrome extension that supercharges Chrome's built‑in Global Media Control. It delivers true **unified control** across all your media, **global shortcuts** for instant actions, and **independent tab sessions** so each tab keeps its own playback, speed, and effect state without interference.
 
+> Release history: see [RELEASE.md](RELEASE.md)
+
 ![Logo](docs/imgs/banner.png)
 
 
@@ -27,15 +29,18 @@ Global Media Control (GMC)-Enhance is a Chrome extension that supercharges Chrom
 
 ## Features
 
-GMC-Enhance offers a range of features to improve your media playback experience:
+GMC-Enhance offers:
 
-- [x] **Unified Media Control**: Manage all media sessions from a single toolbar interface without switching tabs.
-- [x] **Playback Control**: Play, pause, skip backward/forward, and adjust playback speed.
-- [x] **Global Shortcuts**: Keyboard shortcuts for instant control (seek, speed, volume, mute, select active video).
-- [x] **Independent Tab Sessions**: Each tab maintains its own playback speed, selected target video, volume, and audio effect state—no accidental cross‑tab interference.
-- [x] **Volume Control**: Adjust volume levels for individual videos, including mute/unmute options.
-- [x] **Audio Effects**: Enhance audio quality by adjusting specific frequency bands (e.g., reduce vocals or boost bass).
-- [x] **Floating Window**: Displays a floating window when adjusting via shortcuts, making it easy to view the current status.
+- **Unified Media Control** – One toolbar entry for all audible media.
+- **Playback & Seeking** – Play / pause / backward / forward (configurable step).
+- **Speed Management** – Increment/decrement, reset, preset cycling + per‑tab speed badge (hidden at 1×).
+- **Global Shortcuts** – Seek, speed, volume, mute, target selection.
+- **Independent Tab Sessions** – Each tab keeps its own state (speed / volume / EQ).
+- **Volume & Mute** – Fine‑grained steps and quick mute toggle.
+- **Equalizer (10-Band)** – Core frequency shaping with presets.
+- **Floating HUD** – Instant feedback on shortcut actions (cross‑tab aware).
+
+> Full cumulative change log: see [RELEASE.md](RELEASE.md).
 
 
 
@@ -54,6 +59,12 @@ Enhance your listening experience with advanced audio controls. For example:
 - Boost bass by increasing low-frequency bands.
 
 These adjustments are particularly useful for live streams or videos with unbalanced audio.
+
+Features include:
+- 10-Band Equalizer: Adjust frequency bands from 31Hz to 16kHz.
+- Preset Management: Save, load, and delete custom EQ presets.
+- Real-Time Spectrum: Visualize the current audio spectrum to help you see the effect of your adjustments.
+![EQ Page](docs/imgs/eq-function.png)
 
 ### 3. Shortcuts
 
@@ -76,6 +87,21 @@ GMC-Enhance supports the following keyboard shortcuts for fast, interruption‑f
 ![Floating Video Control](docs/imgs/video_float_card.gif)
 
 **Tip**: By mapping shortcuts to a keyboard knob, you can achieve precise control over video progress, which was the inspiration behind this extension.
+
+### 4. Icon Badges & Visual Cues
+
+- Red-tinted icon: EQ has non-zero gain adjustments.
+- Orange badge: Tab playback speed (hidden at 1×).
+- Combined: Indicates both “modified EQ” and “non‑standard speed”.
+
+### 5. FAQ (Quick Answers)
+
+| Question | Answer |
+|----------|--------|
+| HUD sometimes stops updating? | When controlling a media element in a non-active tab, background polling (200ms) drives updates; active tab uses frame-driven updates. |
+| Live stream seeking ignored? | Live sources suppress seek jumps and show informational state instead. |
+| Speed badge missing? | Only shown when playback rate ≠ 1×; returning to 1× clears it. |
+| Old preset lacked Q? | A default Q is applied; re-save to embed Q. |
 
 ## Installation
 

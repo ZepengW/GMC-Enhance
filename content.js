@@ -28,7 +28,10 @@
   overlayMedia: null,
   overlayMediaTimeHandler: null,
     seekPreviewActive: false,
-    isRemoteOverlay: false
+    isRemoteOverlay: false,
+    suppressNativeSeekOverlay: true, // 配置：原生拖动不弹 HUD
+    extensionSeeking: false, // 扩展内部触发的 seek（允许 HUD）
+    overlayEverShown: false
   };
   // ====== EQ 状态 ======
   const EQ = {
@@ -82,17 +85,24 @@
     if (STATE.mediaListenerMap.has(media)) return;
     const onSeeking = () => {
       STATE.localSeeking = true;
-      STATE.seekPreviewActive = true; // 处于本地“调整中”
-      STATE.isRemoteOverlay = false; // 本地操作优先，允许 RAF 刷新
-      setProgressHighlight(true, { persist: true });
+      STATE.seekPreviewActive = true;
+      STATE.isRemoteOverlay = false;
+      // 仅当不是原生触发或已显示过覆盖层才高亮
+      if (!STATE.suppressNativeSeekOverlay || STATE.extensionSeeking || STATE.overlayEverShown) {
+        setProgressHighlight(true, { persist: true });
+      }
       ensureProgressTick();
     };
     const onSeeked = () => {
       STATE.localSeeking = false;
       STATE.seekPreviewActive = false;
       setProgressHighlight(false);
-      try { updateLocalOverlay(); } catch {}
-      resetOverlayAutoHide();
+      // 只有扩展触发或之前已经展示过才刷新 HUD
+      if (STATE.extensionSeeking || STATE.overlayEverShown) {
+        try { updateLocalOverlay(); } catch {}
+        resetOverlayAutoHide();
+      }
+      STATE.extensionSeeking = false; // 重置标记
       ensureProgressTick();
     };
     media.addEventListener('seeking', onSeeking);
@@ -579,6 +589,7 @@
     const media = getActiveMedia();
   if (!media) { showSelectHUD('未找到媒体'); return; }
     try {
+      STATE.extensionSeeking = true;
       const next = media.currentTime + deltaSec;
       media.currentTime = Math.max(0, Math.min(isFinite(media.duration) ? media.duration : next, next));
       updateLocalOverlay({actionLabel: `${deltaSec>=0? '快进':'快退'} ${Math.abs(deltaSec)}s`});
@@ -609,6 +620,7 @@
   // 统一为后台消息调用封装一个操作后展示覆盖层的辅助
   function showOverlayForMedia(media, label) {
     if (!media) return;
+    STATE.overlayEverShown = true;
     updateLocalOverlay({ actionLabel: label });
   }
   async function saveBlob(blob, filename) {
@@ -1141,10 +1153,10 @@
     if (msg?.type === 'gmcx-mute-media') { const media = getActiveMedia(); if (media) { media.muted = true; if (!msg.silent) showOverlayForMedia(media, '静音'); } sendResponse({ok:true}); return; }
     if (msg?.type === 'gmcx-unmute-media') { const media = getActiveMedia(); if (media) { media.muted = false; if (!msg.silent) showOverlayForMedia(media, '取消静音'); } sendResponse({ok:true}); return; }
     if (msg?.type === 'gmcx-set-media-volume') { const media = getActiveMedia(); if (media) { const vol = Math.min(1, Math.max(0, Number(msg.value))); media.volume = vol; if (vol > 0 && media.muted) media.muted = false; if (!msg.silent) showOverlayForMedia(media, `音量 ${(vol*100).toFixed(0)}%`);} sendResponse({ok:true}); return; }
-  if (msg?.type === 'gmcx-seek-media') { const media = getActiveMedia(); if (media && isFinite(media.duration)) { const delta = Number(msg.value) || 0; media.currentTime = Math.max(0, Math.min(media.duration, media.currentTime + delta)); if (!msg.silent) { showOverlayForMedia(media, `${delta>=0? '快进':'快退'} ${Math.abs(delta)}s`); flashProgressHighlight(); } } sendResponse({ ok: true }); return; }
+  if (msg?.type === 'gmcx-seek-media') { const media = getActiveMedia(); if (media && isFinite(media.duration)) { const delta = Number(msg.value) || 0; STATE.extensionSeeking = true; media.currentTime = Math.max(0, Math.min(media.duration, media.currentTime + delta)); if (!msg.silent) { showOverlayForMedia(media, `${delta>=0? '快进':'快退'} ${Math.abs(delta)}s`); flashProgressHighlight(); } } sendResponse({ ok: true }); return; }
     if (msg?.type === 'gmcx-set-media-speed') { const media = getActiveMedia(); if (media) { media.playbackRate = Number(msg.value); if (!msg.silent) showOverlayForMedia(media, `速度 ${media.playbackRate.toFixed(2)}×`);} sendResponse({ ok: true }); return; }
     if (msg?.type === 'gmcx-reset-media') { const media = getActiveMedia(); if (media) { media.currentTime = 0; media.playbackRate = 1.0; if (!msg.silent) showOverlayForMedia(media, '重置'); } sendResponse({ ok: true }); return; }
-  if (msg?.type === 'gmcx-set-media-currentTime') { const media = getActiveMedia(); if (media && isFinite(media.duration)) { const target = Math.max(0, Math.min(media.duration, Number(msg.value))); media.currentTime = target; if (!msg.silent) { showOverlayForMedia(media, `跳转 ${formatTime(target)}`); flashProgressHighlight(); } } sendResponse({ ok: true }); return; }
+  if (msg?.type === 'gmcx-set-media-currentTime') { const media = getActiveMedia(); if (media && isFinite(media.duration)) { const target = Math.max(0, Math.min(media.duration, Number(msg.value))); STATE.extensionSeeking = true; media.currentTime = target; if (!msg.silent) { showOverlayForMedia(media, `跳转 ${formatTime(target)}`); flashProgressHighlight(); } } sendResponse({ ok: true }); return; }
     // 4) EQ 消息处理
     if (msg?.type === 'gmcx-eq-init') { loadCustomPresets(() => { loadGlobalQ(()=>{ const media = getActiveMedia(); if (!media) { sendResponse({ok:false}); return; } ensureMediaEQ(media); const gains = (EQ.sourceMap.get(media)?.filters || []).map(f => f.gain.value); sendResponse({ok:true, freqs: EQ.freqs, gains, builtin: EQ.builtinPresets, custom: EQ.customPresets, q: EQ.currentQ}); }); }); return true; }
     if (msg?.type === 'gmcx-eq-get-state') { const media = getActiveMedia(); if (!media) { sendResponse({ok:false}); return; } const entry = ensureMediaEQ(media); const gains = entry ? entry.filters.map(f => f.gain.value) : EQ.freqs.map(()=>0); sendResponse({ok:true, gains}); try { const modified = gains.some(v => Math.abs(Number(v)||0) > 0.0001); chrome.runtime.sendMessage({ type: 'gmcx-eq-modified-state', modified }); } catch {} return; }

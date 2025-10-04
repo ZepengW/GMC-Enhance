@@ -173,6 +173,39 @@ async function setActionIconModified(tabId, modified) {
   }
 }
 
+// ===== 新增：每标签页播放速度徽章 =====
+// 仅在速度 != 1 时显示，尽量保持 3~4 字符内（例如 .75 / 1.25 / 2 / 2.5 / 12 ）
+function formatRateForBadge(rate) {
+  const r = Number(rate);
+  if (!isFinite(r)) return '';
+  if (Math.abs(r - 1) < 0.01) return '';
+  // 保留 2 位用于小速率精度
+  let str = r.toFixed(r < 1 ? 2 : 2);
+  str = str.replace(/0+$/,'').replace(/\.$/,'');
+  if (r < 1) str = str.replace(/^0/, ''); // 去掉 0 前导 => .75
+  // 长度控制
+  if (str.length > 4) {
+    str = r.toFixed(1).replace(/0+$/,'').replace(/\.$/,'');
+    if (r < 1) str = str.replace(/^0/, '');
+  }
+  if (str.length > 4) {
+    str = Math.round(r).toString();
+  }
+  return str;
+}
+function updateSpeedBadge(tabId, rate) {
+  try {
+    const text = formatRateForBadge(rate);
+    if (!text) {
+      chrome.action.setBadgeText({ tabId, text: '' });
+      return;
+    }
+    // 统一背景色（橘黄色区分于红色图标本体）
+    chrome.action.setBadgeBackgroundColor({ tabId, color: '#ff9800' });
+    chrome.action.setBadgeText({ tabId, text });
+  } catch {}
+}
+
 /**
  * 在未进入强制全局模式 (forceGlobal=false) 时，尝试把当前活动标签页内的媒体
  * 设置为 GLOBAL_MEDIA.selectedIndex ，以实现“同一套界面逻辑 A 默认聚焦当前页面媒体”。
@@ -531,6 +564,7 @@ async function applyPlaybackRate(rate) {
   // 抑制本地覆盖层，统一使用全局覆盖层
   const after = await sendToTab(entry.tab.id, {type:'gmcx-get-media-info'});
   if (after && after.ok) {
+    updateSpeedBadge(entry.tab.id, after.playbackRate);
     overlayUpdateOnActive({
       mode:'speed-set',
       index: GLOBAL_MEDIA.selectedIndex + 1,
@@ -797,6 +831,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (action === 'set-speed') {
           await sendToTab(tid, {type:'gmcx-set-media-speed', value: Number(value) || 1, silent:true});
           const after = await getInfo();
+          if (after && after.ok) updateSpeedBadge(tid, after.playbackRate);
           pushOverlay(after, 'speed-set');
           sendResponse && sendResponse({ ok:true }); return;
         }
@@ -879,6 +914,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     sendResponse && sendResponse({ok:false});
     return; // not async
   }
+  // 被动同步：内容脚本告知当前标签页播放速率（例如用户在页面内原生控件修改）
+  if (msg?.type === 'gmcx-sync-playback-rate') {
+    const tabId = sender?.tab?.id;
+    if (typeof tabId === 'number' && typeof msg.rate === 'number') {
+      updateSpeedBadge(tabId, msg.rate);
+      sendResponse && sendResponse({ok:true});
+      return; // not async
+    }
+    sendResponse && sendResponse({ok:false});
+    return; // not async
+  }
   if (msg?.type === "gmcx-capture-visible-tab") {
     chrome.tabs.captureVisibleTab({ format: "png" }, (dataUrl) => {
       if (chrome.runtime.lastError) {
@@ -895,8 +941,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (GLOBAL_MEDIA.selectedIndex < 0) { sendResponse({ok:false}); return; }
       if (msg.action === 'up') { await adjustPlaybackRate(+GLOBAL_MEDIA.speedStep); sendResponse({ok:true}); return; }
       if (msg.action === 'down') { await adjustPlaybackRate(-GLOBAL_MEDIA.speedStep); sendResponse({ok:true}); return; }
-      if (msg.action === 'reset') { await applyPlaybackRate(1); sendResponse({ok:true}); return; }
-      if (msg.action === 'cycle') { await cyclePlaybackPreset(); sendResponse({ok:true}); return; }
+      if (msg.action === 'reset') { await applyPlaybackRate(1); const entry = GLOBAL_MEDIA.mediaList[GLOBAL_MEDIA.selectedIndex]; if (entry && entry.tab && entry.tab.id) updateSpeedBadge(entry.tab.id, 1); sendResponse({ok:true}); return; }
+      if (msg.action === 'cycle') { await cyclePlaybackPreset(); const entry = GLOBAL_MEDIA.mediaList[GLOBAL_MEDIA.selectedIndex]; if (entry && entry.tab && entry.tab.id) { const info = await sendToTab(entry.tab.id, {type:'gmcx-get-media-info'}); if (info && info.ok) updateSpeedBadge(entry.tab.id, info.playbackRate); } sendResponse({ok:true}); return; }
       sendResponse({ok:false});
     })();
     return true;

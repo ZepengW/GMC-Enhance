@@ -34,22 +34,42 @@
   const EQ = {
     ctx: null,
     sourceMap: new WeakMap(), // media -> {source, filters:[], analyser?, fftBuf?}
-    freqs: [60,170,400,1000,2500,6000,15000],
+    // 使用 10 段常用频点
+    freqs: [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000],
     ranges: { min: -24, max: 24 },
     builtinPresets: [
-      { name: '原始', gains: [0,0,0,0,0,0,0] },
-      { name: '低音增强', gains: [8,6,4,1,0,-2,-4] },
-      { name: '人声增强', gains: [-2,0,2,4,3,1,0] },
-      { name: '高音增强', gains: [-4,-2,0,1,2,4,6] },
-      { name: '影院', gains: [6,4,2,0,1,3,5] }
+      { name: '原始', gains: [0,0,0,0,0,0,0,0,0,0] },
+      { name: '低音增强', gains: [6,5,4,2,1,0,-1,-2,-3,-4] },
+      { name: '人声增强', gains: [-3,-2,-1,0,1,3,2,1,0,-1] },
+      { name: '高音增强', gains: [-5,-4,-3,-2,-1,0,2,4,6,7] },
+      { name: '影院', gains: [4,3,2,1,0,0,1,2,3,4] }
     ],
     customPresets: [],
     loadedCustom: false,
     analyserFftSize: 2048,
-    analyserSmoothing: 0.75
+    analyserSmoothing: 0.5
   };
   // ====== EQ 记忆（按页面） ======
   const EQMEM = { applied: false };
+  // ===== 7 段 -> 10 段 迁移/适配工具 =====
+  const LEGACY_FREQS_7 = [60,170,400,1000,2500,6000,15000];
+  function log10(x){ return Math.log(x)/Math.log(10); }
+  function interp1dLogX(xs, ys, x) {
+    const L = xs.length;
+    if (x <= xs[0]) return ys[0];
+    if (x >= xs[L-1]) return ys[L-1];
+    let i = 0; while (i < L-1 && x > xs[i+1]) i++;
+    const lx = log10(x), lx0 = log10(xs[i]), lx1 = log10(xs[i+1]);
+    const t = (lx - lx0) / (lx1 - lx0);
+    return ys[i] + (ys[i+1] - ys[i]) * t;
+  }
+  function adaptGainsToCurrent(gains) {
+    if (!Array.isArray(gains)) return EQ.freqs.map(()=>0);
+    if (gains.length === EQ.freqs.length) return gains.slice();
+    if (gains.length === LEGACY_FREQS_7.length) return EQ.freqs.map(f => interp1dLogX(LEGACY_FREQS_7, gains, f));
+    const L = gains.length;
+    return EQ.freqs.map((_, i) => gains[Math.round(i*(L-1)/(EQ.freqs.length-1))] || 0);
+  }
   // 绑定媒体事件，以便在用户在网页端主动调整进度时，HUD 自动高亮并在结束后恢复蓝色且实时刷新
   function ensureMediaEventBindings(media) {
     if (!(media instanceof HTMLMediaElement)) return;
@@ -146,61 +166,110 @@
       });
       // 串联，并在末端挂接 Analyser，用于频谱可视化
       const lastNode = filters.reduce((prev, cur) => { prev.connect(cur); return cur; }, source);
-      let analyser = null, fftBuf = null;
+        let analyserPre = null, fftBufPre = null;
+        let analyserPost = null, fftBufPost = null;
       try {
-        analyser = ctx.createAnalyser();
-        analyser.fftSize = EQ.analyserFftSize;
-        analyser.smoothingTimeConstant = EQ.analyserSmoothing;
-        fftBuf = new Uint8Array(analyser.frequencyBinCount);
-        lastNode.connect(analyser);
-        analyser.connect(ctx.destination);
+          // 原始：从 source 分支，不接输出
+          analyserPre = ctx.createAnalyser();
+          analyserPre.fftSize = EQ.analyserFftSize;
+          analyserPre.smoothingTimeConstant = EQ.analyserSmoothing;
+          fftBufPre = new Uint8Array(analyserPre.frequencyBinCount);
+          source.connect(analyserPre);
+          // 调整后：从滤波末端到 analyserPost，再到输出
+          analyserPost = ctx.createAnalyser();
+          analyserPost.fftSize = EQ.analyserFftSize;
+          analyserPost.smoothingTimeConstant = EQ.analyserSmoothing;
+          fftBufPost = new Uint8Array(analyserPost.frequencyBinCount);
+          lastNode.connect(analyserPost);
+          analyserPost.connect(ctx.destination);
       } catch {
         // 若创建失败，直接连到目的地
         lastNode.connect(ctx.destination);
       }
-      entry = { source, filters, analyser, fftBuf };
+        entry = { source, filters, analyserPre, fftBufPre, analyserPost, fftBufPost };
       EQ.sourceMap.set(media, entry);
       return entry;
     } catch { return null; }
   }
 
   // 计算每个 EQ 频段的能量（0..1），通过分析器频谱数据做近邻平均
-  function getPerBandAmplitudes(media) {
-    const ctx = ensureEQContext();
-    if (!ctx) return null;
-    const entry = ensureMediaEQ(media);
-    if (!entry || !entry.analyser || !entry.fftBuf) return null;
+  function computeBandsFromAnalyser(ctx, analyser, buf) {
+    if (!ctx || !analyser || !buf) return null;
     try {
-      entry.analyser.getByteFrequencyData(entry.fftBuf);
+      analyser.getByteFrequencyData(buf);
       const nyquist = ctx.sampleRate / 2;
-      const bins = entry.fftBuf.length; // frequencyBinCount
-      const data = entry.fftBuf;
-      const bandVals = EQ.freqs.map((freq) => {
-        const idx = Math.max(0, Math.min(bins - 1, Math.round(freq / nyquist * (bins - 1))));
-        // 平均 idx 附近的窗口，提升稳定性
-        let sum = 0, count = 0;
-        const win = 2;
-        for (let k = idx - win; k <= idx + win; k++) {
-          if (k >= 0 && k < bins) { sum += data[k]; count++; }
-        }
-        const avg = count ? (sum / count) : 0;
+      const bins = buf.length; // frequencyBinCount
+      const data = buf;
+      const centers = EQ.freqs;
+      const lows = centers.map((f,i)=> i===0 ? f/Math.SQRT2 : Math.sqrt(centers[i-1]*f));
+      const highs = centers.map((f,i)=> i===centers.length-1 ? f*Math.SQRT2 : Math.sqrt(f*centers[i+1]));
+      const bandVals = centers.map((_, i) => {
+        const lo = Math.max(1, lows[i]);
+        const hi = Math.min(nyquist-1, highs[i]);
+        const i0 = Math.max(0, Math.floor(lo / nyquist * (bins-1)));
+        const i1 = Math.max(i0, Math.ceil(hi / nyquist * (bins-1)));
+        let sum = 0;
+        for (let k=i0;k<=i1;k++) sum += data[k];
+        const avg = (i1>=i0) ? sum / (i1-i0+1) : 0;
         return Math.max(0, Math.min(1, avg / 255));
       });
       return bandVals;
     } catch { return null; }
   }
+  // 返回 { pre, post }
+  function getPerBandAmplitudes(media) {
+    const ctx = ensureEQContext();
+    if (!ctx) return null;
+    const entry = ensureMediaEQ(media);
+    if (!entry) return null;
+    const pre = computeBandsFromAnalyser(ctx, entry.analyserPre, entry.fftBufPre);
+    const post = computeBandsFromAnalyser(ctx, entry.analyserPost, entry.fftBufPost);
+    if (!pre && !post) return null;
+    return { pre, post };
+  }
+
+  // 真实 EQ 综合频率响应（dB），以对数间隔频率采样并聚合所有峰值滤波器的响应
+  function getCombinedEqResponse(points = 128, fMin = 20, fMax = 20000) {
+    const ctx = ensureEQContext();
+    if (!ctx) return null;
+    const media = getActiveMedia();
+    if (!media) return null;
+    const entry = ensureMediaEQ(media);
+    if (!entry) return null;
+    const filters = entry.filters || [];
+    const freqs = new Float32Array(points);
+    const mags = new Float32Array(points);
+    const phases = new Float32Array(points);
+    const logMin = Math.log10(fMin), logMax = Math.log10(fMax);
+    for (let i=0;i<points;i++) {
+      const t = i/(points-1);
+      freqs[i] = Math.pow(10, logMin + t*(logMax - logMin));
+      mags[i] = 1.0;
+    }
+    const tmpMag = new Float32Array(points);
+    const tmpPhase = new Float32Array(points);
+    for (const f of filters) {
+      try {
+        f.getFrequencyResponse(freqs, tmpMag, tmpPhase);
+        for (let i=0;i<points;i++) mags[i] *= (tmpMag[i] || 1.0);
+      } catch {}
+    }
+    const magsDb = Array.from(mags, m => 20*Math.log10(Math.max(1e-6, m)));
+    return { freqs: Array.from(freqs), magsDb };
+  }
   function applyGains(media, gains) {
     const entry = ensureMediaEQ(media);
     if (!entry) return false;
+    const gg = adaptGainsToCurrent(gains);
     entry.filters.forEach((f, i) => {
-      if (typeof gains[i] === 'number') {
-        const g = Math.max(EQ.ranges.min, Math.min(EQ.ranges.max, gains[i]));
+      if (typeof gg[i] === 'number') {
+        const g = Math.max(EQ.ranges.min, Math.min(EQ.ranges.max, gg[i]));
         f.gain.value = g;
       }
     });
       // 通知后台当前页面 EQ 是否为非原始（有任一增益非0）
       try {
-        const modified = Array.isArray(gains) && gains.some(v => Math.abs(Number(v)||0) > 0.0001);
+        const modified = Array.isArray(gg) && gg.some(v => Math.abs(Number(v)||0) > 0.0001);
         chrome.runtime.sendMessage({ type: 'gmcx-eq-modified-state', modified });
       } catch {}
     return true;
@@ -226,7 +295,12 @@
   function loadCustomPresets(cb) {
     if (EQ.loadedCustom) { cb && cb(); return; }
     chrome.storage.sync.get({ eqCustomPresets: [] }, (cfg) => {
-      if (Array.isArray(cfg.eqCustomPresets)) EQ.customPresets = cfg.eqCustomPresets.filter(p => Array.isArray(p.gains) && p.gains.length === EQ.freqs.length);
+      if (Array.isArray(cfg.eqCustomPresets)) {
+        EQ.customPresets = cfg.eqCustomPresets
+          .filter(p => Array.isArray(p.gains))
+          .map(p => ({ name: p.name, gains: adaptGainsToCurrent(p.gains) }))
+          .filter(p => p.gains.length === EQ.freqs.length);
+      }
       EQ.loadedCustom = true;
       cb && cb();
     });
@@ -1066,11 +1140,19 @@
     if (msg?.type === 'gmcx-eq-spectrum-sample') {
       const media = getActiveMedia();
       if (!media) { sendResponse({ ok: false }); return; }
-      const arr = getPerBandAmplitudes(media);
-      if (!arr) { sendResponse({ ok: false }); return; }
-      sendResponse({ ok: true, bands: arr });
+      const res = getPerBandAmplitudes(media);
+      if (!res) { sendResponse({ ok: false }); return; }
+      sendResponse({ ok: true, pre: res.pre || null, post: res.post || null, freqs: EQ.freqs });
       return;
     }
+    if (msg?.type === 'gmcx-eq-get-response') {
+      const n = Math.max(16, Math.min(1024, Number(msg.points) || 128));
+      const resp = getCombinedEqResponse(n);
+      if (!resp) { sendResponse({ ok:false }); return; }
+      sendResponse({ ok:true, freqs: resp.freqs, magsDb: resp.magsDb });
+      return;
+    }
+    
     // 5) 全局媒体探测（供后台扫描使用）
   if (msg?.type === 'gmcx-get-media-info') {
       const blacklist = ['https://www.bilibili.com/','https://www.douyu.com/'];

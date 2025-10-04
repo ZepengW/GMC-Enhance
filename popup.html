@@ -10,6 +10,29 @@
   <div id="media-list" class="preload-hidden">
     <div id="no-media">未检测到任何标签页的音视频</div>
     <!-- 动态插入媒体卡片 -->
+      <div class="eq-panel" style="display:none;margin-top:10px;border-top:1px solid #eee;padding-top:8px;">
+        <div class="eq-presets" style="display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap;">
+          <select class="eq-preset-select" style="flex:1;min-width:140px;font-size:12px;padding:4px 6px;"></select>
+          <input class="eq-save-name" type="text" placeholder="自定义名称" style="flex:1;min-width:120px;font-size:12px;padding:4px 6px;">
+          <button class="media-btn eq-save" style="font-size:12px;">保存</button>
+          <button class="media-btn eq-del" style="font-size:12px;display:none;">删除</button>
+          <button class="media-btn eq-reset" style="font-size:12px;">恢复原始音效</button>
+          <button class="media-btn eq-spectrum-toggle" title="显示/隐藏频谱（按频段能量）" style="font-size:12px;">🌈 频谱</button>
+        </div>
+        <div class="eq-bands" style="display:flex;gap:8px;justify-content:space-between;">
+        </div>
+        <div class="eq-graph-controls" style="display:none;align-items:center;gap:10px;margin-top:8px;font-size:12px;">
+          <label style="display:flex;align-items:center;gap:4px;"><input type="checkbox" class="eq-show-pre" checked> 原始频谱</label>
+          <label style="display:flex;align-items:center;gap:4px;"><input type="checkbox" class="eq-show-post" checked> 调整后频谱</label>
+          <label style="display:flex;align-items:center;gap:4px;"><input type="checkbox" class="eq-show-curve" checked> 增益曲线</label>
+        </div>
+        <canvas class="eq-graph" width="320" height="160" style="display:none;width:100%;height:160px;background:#fbfcff;border:1px solid #e8ecf5;border-radius:8px;margin-top:6px;"></canvas>
+        <div class="eq-spectrum" style="display:none;margin-top:10px;padding:6px 4px;background:#fafbff;border:1px solid #e8ecf5;border-radius:8px;">
+          <div class="eq-spectrum-bars" style="display:flex;align-items:flex-end;gap:6px;height:64px;">
+          </div>
+          <div class="eq-spectrum-labels" style="display:flex;justify-content:space-between;gap:6px;font-size:10px;color:#666;margin-top:4px;"></div>
+        </div>
+      </div>
   </div>
   <script src="popup.js"></script>
 </body>

@@ -138,16 +138,35 @@ function renderMediaList(mediaList) {
       </div>
       <input type="range" class="seek-bar" min="0" max="${info.rawDuration}" value="${info.rawCurrentTime}" step="0.01" ${isLive || !isFinite(info.rawDuration) ? 'disabled' : ''}>
       <div class="eq-panel" style="display:none;margin-top:10px;border-top:1px solid #eee;padding-top:8px;">
-        <div class="eq-presets" style="display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap;">
-          <select class="eq-preset-select" style="flex:1;min-width:140px;font-size:12px;padding:4px 6px;"></select>
-          <input class="eq-save-name" type="text" placeholder="自定义名称" style="flex:1;min-width:120px;font-size:12px;padding:4px 6px;">
-          <button class="media-btn eq-save" style="font-size:12px;">保存</button>
-          <button class="media-btn eq-del" style="font-size:12px;display:none;">删除</button>
-          <button class="media-btn eq-reset" style="font-size:12px;">恢复原始音效</button>
-          <button class="media-btn eq-spectrum-toggle" title="显示/隐藏频谱（按频段能量）" style="font-size:12px;">🌈 频谱</button>
+        <div class="eq-presets" style="display:flex;align-items:center;gap:4px;margin-bottom:6px;flex-wrap:wrap;">
+          <select class="eq-preset-select" style="flex:1;min-width:120px;font-size:12px;padding:3px 4px;"></select>
+          <input class="eq-save-name" type="text" placeholder="名称" style="width:110px;font-size:12px;padding:3px 4px;">
+          <button class="media-btn eq-save" style="font-size:11px;padding:3px 6px;">保存</button>
+          <button class="media-btn eq-del" style="font-size:11px;padding:3px 6px;display:none;">删</button>
+          <button class="media-btn eq-reset" style="font-size:11px;padding:3px 6px;">原始</button>
+          <button class="media-btn eq-spectrum-toggle" title="显示/隐藏频谱图" style="font-size:11px;padding:3px 6px;">🌈</button>
         </div>
-        <div class="eq-bands" style="display:flex;gap:8px;justify-content:space-between;">
+        <div class="eq-bands" style="display:flex;gap:4px;justify-content:space-between;">
         </div>
+  <!-- Removed standalone gain curve canvas (merged into unified graph) -->
+        <div class="eq-graph-controls" style="display:none;align-items:center;gap:10px;margin-top:6px;font-size:12px;flex-wrap:wrap;">
+          <label style="display:flex;align-items:center;gap:4px;"><input type="checkbox" class="eq-show-pre" checked> 原始频谱</label>
+          <label style="display:flex;align-items:center;gap:4px;"><input type="checkbox" class="eq-show-post" checked> 调整后频谱</label>
+          <label style="display:flex;align-items:center;gap:4px;"><input type="checkbox" class="eq-show-curve" checked> 增益曲线</label>
+          <label style="display:flex;align-items:center;gap:4px;"><input type="checkbox" class="eq-show-hist" checked> 历史范围</label>
+          <span class="eq-legend" style="display:flex;align-items:center;gap:10px;margin-left:auto;">
+            <span style="display:flex;align-items:center;gap:4px;font-size:11px;opacity:.85;">
+              <span style="width:11px;height:11px;background:#7aa7ff;border-radius:2px;opacity:.55;"></span><span>原始</span>
+            </span>
+            <span style="display:flex;align-items:center;gap:4px;font-size:11px;opacity:.9;">
+              <span style="width:11px;height:11px;background:#3f78ff;border-radius:2px;"></span><span>调整后</span>
+            </span>
+            <span style="display:flex;align-items:center;gap:4px;font-size:11px;opacity:.95;">
+              <span style="width:14px;height:2px;background:#e24a4a;border-radius:1px;"></span><span>增益</span>
+            </span>
+          </span>
+        </div>
+        <canvas class="eq-graph" width="320" height="160" style="display:none;width:100%;height:160px;background:#fbfcff;border:1px solid #e8ecf5;border-radius:8px;margin-top:6px;"></canvas>
         <div class="eq-spectrum" style="display:none;margin-top:10px;padding:6px 4px;background:#fafbff;border:1px solid #e8ecf5;border-radius:8px;">
           <div class="eq-spectrum-bars" style="display:flex;align-items:flex-end;gap:6px;height:64px;">
           </div>
@@ -295,6 +314,14 @@ function renderMediaList(mediaList) {
   const eqSpectrumWrap = card.querySelector('.eq-spectrum');
   const eqSpectrumBars = card.querySelector('.eq-spectrum-bars');
   const eqSpectrumLabels = card.querySelector('.eq-spectrum-labels');
+  // standalone curve removed
+  const eqGraphControls = card.querySelector('.eq-graph-controls');
+  const eqShowPre = card.querySelector('.eq-show-pre');
+  const eqShowPost = card.querySelector('.eq-show-post');
+  const eqShowCurve = card.querySelector('.eq-show-curve');
+  const eqShowHist = card.querySelector('.eq-show-hist');
+  const eqGraphCanvas = card.querySelector('.eq-graph');
+  const eqGraphCtx = eqGraphCanvas ? eqGraphCanvas.getContext('2d') : null;
     let eqGains = [];
     let eqFreqs = [];
     let eqBuiltin = [];
@@ -326,13 +353,13 @@ function renderMediaList(mediaList) {
       eqBandsWrap.innerHTML = '';
       eqFreqs.forEach((f, idx) => {
         const g = eqGains[idx] || 0;
-        const col = document.createElement('div');
-        col.style.cssText = 'flex:1;display:flex;flex-direction:column;align-items:center;min-width:32px;';
+  const col = document.createElement('div');
+  col.style.cssText = 'flex:1;display:flex;flex-direction:column;align-items:center;min-width:26px;';
         const lab = document.createElement('div'); lab.textContent = f>=1000 ? (f/1000)+'k' : f; lab.style.cssText='font-size:11px;margin-bottom:4px;color:#555;';
         const slider = document.createElement('input');
-        slider.type = 'range'; slider.min = '-24'; slider.max = '24'; slider.step = '0.5'; slider.value = g;
-        slider.style.cssText='writing-mode:bt-lr;appearance:slider-vertical;height:90px;width:30px;';
-        const val = document.createElement('div'); val.textContent = g.toFixed(0)+'dB'; val.style.cssText='font-size:11px;margin-top:4px;color:#333;';
+  slider.type = 'range'; slider.min = '-24'; slider.max = '24'; slider.step = '0.5'; slider.value = g;
+  slider.style.cssText='writing-mode:bt-lr;appearance:slider-vertical;height:78px;width:24px;';
+  const val = document.createElement('div'); val.textContent = g.toFixed(0)+'dB'; val.style.cssText='font-size:10px;margin-top:2px;color:#333;';
         slider.addEventListener('input', (e)=>{ val.textContent = Number(e.target.value).toFixed(0)+'dB'; });
         let debounceTimer=null;
         slider.addEventListener('change', (e)=>{
@@ -341,6 +368,7 @@ function renderMediaList(mediaList) {
           clearTimeout(debounceTimer);
           debounceTimer=setTimeout(()=>{
             sendToTab(tab.id,{type:'gmcx-eq-set-band', index: idx, value: v});
+            resetPostHistory();
           },120);
           // 更新选择与保存按钮可见性
           const allPresets = [...eqBuiltin, ...eqCustom];
@@ -363,10 +391,13 @@ function renderMediaList(mediaList) {
             eqSaveBtn.style.display = 'inline-block';
             setEqButtonTint(true);
           }
+          // 曲线已合并至统一图，仅触发统一重绘
+          drawUnifiedGraph && drawUnifiedGraph();
         });
         col.appendChild(lab); col.appendChild(slider); col.appendChild(val);
         eqBandsWrap.appendChild(col);
       });
+  drawUnifiedGraph && drawUnifiedGraph();
     }
       function renderSpectrumLabels() {
         if (!eqSpectrumLabels) return;
@@ -374,7 +405,7 @@ function renderMediaList(mediaList) {
         eqFreqs.forEach((f) => {
           const lab = document.createElement('div');
           lab.style.cssText = 'flex:1;text-align:center;';
-          lab.textContent = f>=1000 ? (f/1000)+'k' : f;
+          lab.textContent = f>=1000 ? (f/1000).toFixed(f>=10000?0:1)+'k' : f;
           eqSpectrumLabels.appendChild(lab);
         });
       }
@@ -389,19 +420,207 @@ function renderMediaList(mediaList) {
         });
       }
       let spectrumTimer = null;
+      let spectrumEmaPre = [];
+      let spectrumEmaPost = [];
       async function spectrumTick() {
         try {
           const sample = await sendToTab(tab.id, { type: 'gmcx-eq-spectrum-sample' });
-          if (!sample || !sample.ok || !Array.isArray(sample.bands)) return;
+          if (!sample || !sample.ok) return;
+          const bands = Array.isArray(sample.post) ? sample.post : (Array.isArray(sample.pre) ? sample.pre : null);
+          if (!bands) return;
           ensureSpectrumBars();
           const bars = Array.from(eqSpectrumBars.children);
-          sample.bands.forEach((v, i) => {
-            const h = Math.max(4, Math.min(62, Math.round(v * 62))); // 0..1 -> px
+          const alpha = 0.35;
+          bands.forEach((v, i) => {
+            const prev = typeof spectrumEmaPost[i] === 'number' ? spectrumEmaPost[i] : v;
+            const vv = alpha * v + (1 - alpha) * prev;
+            spectrumEmaPost[i] = vv;
+            const h = Math.max(4, Math.min(62, Math.round(vv * 62))); // 0..1 -> px
             const el = bars[i];
             if (el) el.style.height = h + 'px';
           });
         } finally {
-          spectrumTimer = setTimeout(spectrumTick, 120);
+          spectrumTimer = setTimeout(spectrumTick, 80);
+        }
+      }
+
+      // ===== 统一绘图：原始/调整后频谱 + 真实增益曲线 =====
+      let graphTimer = null;
+      let lastCurve = null;
+      let lastCurveTs = 0;
+      const CURVE_REFRESH_MS = 380;
+      let emaPre = [];
+      let emaPost = [];
+      // 历史最值（仅针对 post 频谱）
+      let histPostMin = [];
+      let histPostMax = [];
+      function resetPostHistory() {
+        histPostMin = [];
+        histPostMax = [];
+      }
+      function resizeEqGraphCanvas() {
+        if (!eqGraphCanvas) return;
+        const dpr = window.devicePixelRatio || 1;
+        const w = Math.floor(eqGraphCanvas.clientWidth * dpr);
+        const h = Math.floor(160 * dpr);
+        if (eqGraphCanvas.width !== w || eqGraphCanvas.height !== h) {
+          eqGraphCanvas.width = w; eqGraphCanvas.height = h;
+        }
+      }
+      function drawUnifiedGraph() {
+        if (!eqGraphCtx || !eqGraphCanvas) return;
+        resizeEqGraphCanvas();
+        const W = eqGraphCanvas.width, H = eqGraphCanvas.height;
+        eqGraphCtx.clearRect(0,0,W,H);
+        const AXIS_HEIGHT = Math.floor(18 * (window.devicePixelRatio||1));
+        const plotH = H - AXIS_HEIGHT; // 留出底部横坐标区域
+        // 背景淡填充
+        eqGraphCtx.fillStyle = '#ffffff';
+        eqGraphCtx.fillRect(0,0,W,H);
+        // 水平参考线 (-12 / 0 / +12 dB)
+        eqGraphCtx.strokeStyle = '#eef2f9'; eqGraphCtx.lineWidth = 1;
+        [ -12, 0, 12 ].forEach(dB => {
+          const y = plotH - ((dB + 24) / 48) * plotH;
+          eqGraphCtx.beginPath(); eqGraphCtx.moveTo(0,y); eqGraphCtx.lineTo(W,y); eqGraphCtx.stroke();
+          if (dB === 0) {
+            eqGraphCtx.fillStyle = '#9aa3b1';
+            eqGraphCtx.font = `${10*(window.devicePixelRatio||1)}px sans-serif`;
+            eqGraphCtx.fillText('0dB', 4, Math.max(10, y-2));
+          }
+        });
+        if (!Array.isArray(eqFreqs) || !eqFreqs.length) return;
+        const xs = eqFreqs.map(f => Math.log10(f));
+        const minX = xs[0], maxX = xs[xs.length-1];
+        const xAtF = (f) => {
+          const lx = Math.log10(f);
+          const t = (lx - minX) / (maxX - minX);
+          return (t * (W-12) + 6);
+        };
+        const yFromRatio = (r) => plotH - (r * plotH); // r: 0..1 (幅度映射)
+        const drawGroupedBars = () => {
+          const showPre = !!(eqShowPre?.checked && emaPre.length);
+          const showPost = !!(eqShowPost?.checked && emaPost.length);
+          if (!showPre && !showPost) return;
+          const n = eqFreqs.length;
+          for (let i=0;i<n;i++) {
+            const f = eqFreqs[i];
+            const fn = eqFreqs[Math.min(i+1, n-1)];
+            const x0 = xAtF(f);
+            const x1 = xAtF(fn);
+            const slotW = (x1 - x0)*0.88; // 可利用宽度
+            const cx = x0 + (x1-x0)/2;
+            let bars = [];
+            if (showPre) bars.push({ type:'pre', v: emaPre[i]||0 });
+            if (showPost) bars.push({ type:'post', v: emaPost[i]||0 });
+            const count = bars.length;
+            const gap = 2 * (window.devicePixelRatio||1);
+            let barW = slotW;
+            if (count>1) barW = (slotW - gap*(count-1))/count;
+            barW = Math.max(4, Math.min(30, barW));
+            let startX = cx - ( (count*barW + (count-1)*gap) /2 );
+            bars.forEach(b => {
+              const h = Math.max(2, Math.min(plotH-2, b.v * plotH));
+              const x = Math.round(startX);
+              eqGraphCtx.fillStyle = b.type==='pre' ? '#7aa7ff' : '#3f78ff';
+              eqGraphCtx.globalAlpha = b.type==='pre'?0.5:0.9;
+              eqGraphCtx.fillRect(x, plotH - h, barW, h);
+              startX += barW + gap;
+            });
+          }
+          // 恢复默认 alpha
+          eqGraphCtx.globalAlpha = 1;
+        };
+        drawGroupedBars();
+        // （已移除旧 drawBars 残留代码）
+  if (eqShowPost?.checked && eqShowHist?.checked && histPostMin.length === emaPost.length) {
+          eqGraphCtx.save();
+          // 改为画每个频段的垂直“最值范围”线，顶=历史最大 底=历史最小
+          for (let i=0;i<eqFreqs.length;i++) {
+            const f = eqFreqs[i];
+            const fn = eqFreqs[Math.min(i+1, eqFreqs.length-1)];
+            const x0 = xAtF(f);
+            const x1 = xAtF(fn);
+            const cx = x0 + (x1-x0)/2;
+            const vMin = histPostMin[i];
+            const vMax = histPostMax[i];
+            if (typeof vMin !== 'number' || typeof vMax !== 'number') continue;
+            const yMin = yFromRatio(vMin);
+            const yMax = yFromRatio(vMax);
+            eqGraphCtx.strokeStyle = 'rgba(63,120,255,0.45)';
+            eqGraphCtx.lineWidth = 1;
+            eqGraphCtx.setLineDash([4,4]);
+            eqGraphCtx.beginPath();
+            eqGraphCtx.moveTo(cx, yMax);
+            eqGraphCtx.lineTo(cx, yMin);
+            eqGraphCtx.stroke();
+            // 小端帽
+            eqGraphCtx.setLineDash([]);
+            eqGraphCtx.beginPath();
+            eqGraphCtx.moveTo(cx-4, yMax);
+            eqGraphCtx.lineTo(cx+4, yMax);
+            eqGraphCtx.moveTo(cx-4, yMin);
+            eqGraphCtx.lineTo(cx+4, yMin);
+            eqGraphCtx.stroke();
+            eqGraphCtx.setLineDash([4,4]);
+          }
+          eqGraphCtx.restore();
+        }
+        if (eqShowCurve?.checked && lastCurve && Array.isArray(lastCurve.freqs)) {
+          eqGraphCtx.beginPath(); eqGraphCtx.strokeStyle = '#e24a4a'; eqGraphCtx.lineWidth = 2;
+          const n = Math.min(lastCurve.freqs.length, lastCurve.magsDb.length);
+          for (let i=0;i<n;i++) {
+            const x = xAtF(lastCurve.freqs[i]);
+            const y = plotH - ((lastCurve.magsDb[i] + 24) / 48) * plotH;
+            if (i===0) eqGraphCtx.moveTo(x,y); else eqGraphCtx.lineTo(x,y);
+          }
+          eqGraphCtx.stroke();
+        }
+        // 横坐标（频率）——均匀抽取若干点（所有 band + 边界）
+        eqGraphCtx.save();
+        eqGraphCtx.font = `${10*(window.devicePixelRatio||1)}px sans-serif`;
+        eqGraphCtx.fillStyle = '#5a6270';
+        eqGraphCtx.textAlign = 'center';
+        const labelFreqs = [...eqFreqs];
+        // 避免太密，若>10个则每隔1个取一个
+        let pick = labelFreqs;
+        if (labelFreqs.length > 10) pick = labelFreqs.filter((_,i)=> i%2===0);
+        pick.forEach(f => {
+          const x = xAtF(f);
+          const lab = f >= 1000 ? (f/1000).toFixed(f>=10000?0:1)+'k' : String(f);
+          eqGraphCtx.fillText(lab, x, H-4);
+        });
+        eqGraphCtx.restore();
+      }
+      async function unifiedGraphTick() {
+        try {
+          const sample = await sendToTab(tab.id, { type: 'gmcx-eq-spectrum-sample' });
+          if (sample && sample.ok) {
+            const alpha = 0.35;
+            if (Array.isArray(sample.pre)) {
+              sample.pre.forEach((v,i)=>{
+                const p = typeof emaPre[i]==='number'?emaPre[i]:v; emaPre[i]=alpha*v+(1-alpha)*p;
+              });
+            }
+            if (Array.isArray(sample.post)) {
+              sample.post.forEach((v,i)=>{
+                const p = typeof emaPost[i]==='number'?emaPost[i]:v; const vv = alpha*v+(1-alpha)*p; emaPost[i]=vv;
+                if (typeof histPostMin[i] !== 'number') { histPostMin[i] = vv; histPostMax[i] = vv; }
+                else {
+                  if (vv < histPostMin[i]) histPostMin[i] = vv;
+                  if (vv > histPostMax[i]) histPostMax[i] = vv;
+                }
+              });
+            }
+            if (!eqFreqs.length && Array.isArray(sample.freqs)) eqFreqs = sample.freqs;
+          }
+          const now = Date.now();
+          if (!lastCurve || (now - lastCurveTs) > CURVE_REFRESH_MS) {
+            const resp = await sendToTab(tab.id, { type: 'gmcx-eq-get-response', points: 256 });
+            if (resp && resp.ok) { lastCurve = { freqs: resp.freqs, magsDb: resp.magsDb }; lastCurveTs = now; }
+          }
+          drawUnifiedGraph();
+        } finally {
+          graphTimer = setTimeout(unifiedGraphTick, 120);
         }
       }
     async function loadEQ() {
@@ -450,7 +669,7 @@ function renderMediaList(mediaList) {
       renderSpectrumLabels();
     }
     eqToggle.addEventListener('click', async ()=>{
-      if (eqPanel.style.display==='none') { eqPanel.style.display='block'; await loadEQ(); }
+  if (eqPanel.style.display==='none') { eqPanel.style.display='block'; await loadEQ(); resetPostHistory(); }
       else { eqPanel.style.display='none'; }
     });
     eqPresetSelect.addEventListener('change', async (e)=>{
@@ -459,7 +678,7 @@ function renderMediaList(mediaList) {
       await sendToTab(tab.id, {type:'gmcx-eq-apply-preset', name});
       // 重新获取当前状态
       const st = await sendToTab(tab.id, {type:'gmcx-eq-get-state'});
-      if (st && st.ok) { eqGains = st.gains; renderBands(); }
+  if (st && st.ok) { eqGains = st.gains; renderBands(); drawUnifiedGraph && drawUnifiedGraph(); resetPostHistory(); }
       // 判断删除按钮是否显示（自定义）
       const isCustomSelected = Array.from((e.target.querySelector('optgroup[label="自定义"]')||[]).children).some(o=>o.value===name);
       eqDelBtn.style.display = isCustomSelected ? 'inline-block' : 'none';
@@ -519,26 +738,29 @@ function renderMediaList(mediaList) {
         chrome.runtime.sendMessage({ type: 'gmcx-update-icon-for-tab', tabId: tab.id });
       });
     }
-    if (eqSpectrumToggle && eqSpectrumWrap) {
+    if (eqSpectrumToggle) {
       eqSpectrumToggle.addEventListener('click', async () => {
-        if (eqSpectrumWrap.style.display === 'none') {
+        const showing = eqGraphCanvas && eqGraphCanvas.style.display !== 'none';
+        if (!showing) {
           // 尝试初始化分析器
           const ok = await sendToTab(tab.id, { type: 'gmcx-eq-spectrum-init' });
           if (!ok || !ok.ok) return;
-          eqSpectrumWrap.style.display = 'block';
-          renderSpectrumLabels();
-          ensureSpectrumBars();
-          clearTimeout(spectrumTimer);
-          await spectrumTick();
+          if (eqGraphControls) eqGraphControls.style.display = 'flex';
+          if (eqGraphCanvas) eqGraphCanvas.style.display = 'block';
+          if (eqSpectrumWrap) eqSpectrumWrap.style.display = 'none';
+          clearTimeout(graphTimer); graphTimer = null;
+          await unifiedGraphTick();
           eqSpectrumToggle.textContent = '🌈 频谱';
         } else {
-          eqSpectrumWrap.style.display = 'none';
-          clearTimeout(spectrumTimer);
-          spectrumTimer = null;
+          if (eqGraphControls) eqGraphControls.style.display = 'none';
+          if (eqGraphCanvas) eqGraphCanvas.style.display = 'none';
+          clearTimeout(graphTimer); graphTimer = null;
           eqSpectrumToggle.textContent = '🌈 频谱';
         }
       });
     }
+    // 复选框变化立即重绘
+  [eqShowPre, eqShowPost, eqShowCurve, eqShowHist].forEach(cb => cb && cb.addEventListener('change', ()=> drawUnifiedGraph && drawUnifiedGraph()));
     // 倍速选择
     const speedSelect = card.querySelector('.media-speed');
     const speedCustom = card.querySelector('.media-speed-custom');
@@ -672,7 +894,7 @@ function renderMediaList(mediaList) {
     });
     observer.observe(document.documentElement, {childList: true, subtree: true});
     container.appendChild(card);
-  }
+}
   // 首次完整渲染后淡入
   container.classList.remove('preload-hidden');
 }

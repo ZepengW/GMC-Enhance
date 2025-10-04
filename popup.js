@@ -529,14 +529,80 @@ function renderMediaList(mediaList) {
         // 背景淡填充
         eqGraphCtx.fillStyle = '#ffffff';
         eqGraphCtx.fillRect(0,0,W,H);
-        // 水平参考线 (-12 / 0 / +12 dB)
-        [ -12, 0, 12 ].forEach(dB => {
-          const y = plotH - ((dB + 24) / 48) * plotH;
+        // 动态 dB 范围计算（基于曲线 & 期望上限）
+        let curveMin = 0, curveMax = 0;
+        if (lastCurve && Array.isArray(lastCurve.magsDb) && lastCurve.magsDb.length) {
+          curveMin = Math.min(...lastCurve.magsDb);
+          curveMax = Math.max(...lastCurve.magsDb);
+        }
+        // 基础范围（EQ 允许 -24..+24），若曲线超出则扩展并加 padding
+        let displayMin = -24, displayMax = 24;
+        if (curveMin < displayMin || curveMax > displayMax) {
+          displayMin = Math.min(displayMin, Math.floor(curveMin-1));
+          displayMax = Math.max(displayMax, Math.ceil(curveMax+1));
+        } else {
+          // 如果曲线很窄（例如全 0），保持默认范围不缩放，避免放大噪声
+          const span = curveMax - curveMin;
+          if (span > 6 && span < 36) { // 中等跨度可贴身缩放，留 10% 余量
+            const pad = Math.max(1, span * 0.1);
+            displayMin = Math.floor((curveMin - pad));
+            displayMax = Math.ceil((curveMax + pad));
+            // 仍需包含 0 以保持直观参考（若 0 落在范围外则扩展）
+            if (displayMin > 0) displayMin = 0;
+            if (displayMax < 0) displayMax = 0;
+          }
+        }
+        // 限制极端（不超过 ±60 防止过宽）
+        displayMin = Math.max(-60, displayMin);
+        displayMax = Math.min(60, displayMax);
+        if (displayMax - displayMin < 6) { // 保底可视高度
+          const mid = (displayMax + displayMin)/2;
+          displayMin = mid - 3; displayMax = mid + 3;
+        }
+        const rangeSpan = displayMax - displayMin;
+        const mapDbY = (dB) => {
+          const t = (dB - displayMin) / rangeSpan; // 0..1 bottom->top
+          return plotH - t * plotH;
+        };
+        // 生成刻度（优先 0 ；其他使用“好看”间隔）
+        function niceStep(span) {
+          const raw = span / 6; // 目标 ~6 条
+          const pow10 = Math.pow(10, Math.floor(Math.log10(raw)));
+            const candidates = [1,2,2.5,5,10].map(v=>v*pow10);
+          let best = candidates[0];
+          candidates.forEach(c=>{ if (Math.abs(raw-c) < Math.abs(raw-best)) best = c; });
+          return best;
+        }
+        const step = niceStep(rangeSpan);
+        let ticks = [];
+        // 向下
+        let t0 = 0;
+        if (displayMin > 0 || displayMax < 0) {
+          // 0 不在范围内，不特别处理
+        } else {
+          ticks.push(0);
+        }
+        let down = 0 - step;
+        while (down >= displayMin - 1e-6) { ticks.push(down); down -= step; }
+        let up = 0 + step;
+        while (up <= displayMax + 1e-6) { ticks.push(up); up += step; }
+        // 若 0 不在范围（极端缩放），补齐边界刻度
+        if (ticks.length === 0) {
+          ticks.push(displayMin, displayMax);
+        } else {
+          ticks.push(displayMin, displayMax);
+        }
+        ticks = Array.from(new Set(ticks.map(v=>Math.round(v*100)/100)))
+          .filter(v => v >= displayMin-1e-6 && v <= displayMax+1e-6)
+          .sort((a,b)=>a-b);
+        ticks.forEach(dB => {
+          const y = mapDbY(dB);
           eqGraphCtx.beginPath();
-          eqGraphCtx.strokeStyle = dB === 0 ? '#f2f4f7' : '#f5f7fa';
-          eqGraphCtx.lineWidth = dB === 0 ? 1 : 1;
-            eqGraphCtx.moveTo(0,y); eqGraphCtx.lineTo(W,y); eqGraphCtx.stroke();
-          if (dB === 0) {
+          const isZero = Math.abs(dB) < 1e-6;
+          eqGraphCtx.strokeStyle = isZero ? '#f2f4f7' : '#f5f7fa';
+          eqGraphCtx.lineWidth = isZero ? 1 : 1;
+          eqGraphCtx.moveTo(0,y); eqGraphCtx.lineTo(W,y); eqGraphCtx.stroke();
+          if (isZero) {
             eqGraphCtx.fillStyle = '#b4bcc6';
             eqGraphCtx.font = `${10*(window.devicePixelRatio||1)}px sans-serif`;
             eqGraphCtx.fillText('0dB', 4, Math.max(10, y-2));
@@ -637,12 +703,12 @@ function renderMediaList(mediaList) {
           const n = Math.min(lastCurve.freqs.length, lastCurve.magsDb.length);
           for (let i=0;i<n;i++) {
             const x = xAtF(lastCurve.freqs[i]);
-            const y = plotH - ((lastCurve.magsDb[i] + 24) / 48) * plotH;
+            const y = mapDbY(lastCurve.magsDb[i]);
             if (i===0) eqGraphCtx.moveTo(x,y); else eqGraphCtx.lineTo(x,y);
           }
           eqGraphCtx.stroke();
         }
-        // 内联图例（右上角）
+        // 内联图例（右上角）+ 范围标注
         (function drawLegend(){
           const pad = 6*(window.devicePixelRatio||1);
           const lineH = 12*(window.devicePixelRatio||1);
@@ -650,6 +716,8 @@ function renderMediaList(mediaList) {
           if (eqShowPre?.checked) items.push({type:'box', color:'#1e6fff', label:'原始'});
           if (eqShowPost?.checked) items.push({type:'box', color:'#ff8a2b', label:'调整后'});
           if (eqShowCurve?.checked) items.push({type:'line', color:'#e24a4a', label:'增益'});
+          // 范围标签
+          items.push({type:'text', color:'#666', label:`${displayMin.toFixed(0)}~${displayMax.toFixed(0)} dB`});
           if (!items.length) return;
           eqGraphCtx.save();
           eqGraphCtx.font = `${10*(window.devicePixelRatio||1)}px sans-serif`;

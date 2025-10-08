@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "GMC-Enhance",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "全局媒体统一控制 · 可自定义快捷键 · 独立标签会话 (Unified Control · Shortcuts · Independent Tab Sessions)",
   "permissions": [
     "activeTab",

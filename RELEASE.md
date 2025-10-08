@@ -21,9 +21,11 @@
 2. **步长与文案同步 / Step & Docs Alignment**：默认快进/速度/音量步长与 README 统一，避免快捷键说明与实际行为不一致。
 3. **控制体验优化 / Control UX**：改进跨标签媒体控制的目标锁定逻辑，使后台标签响应更稳定，减少误切换。
 
-1. **Customizable Shortcuts** – Options page now features a keymap table that captures combos, warns about conflicts, and persists them to `storage.sync`; content scripts pick up changes instantly and the HUD plus docs stay aligned.
-2. **Step & Docs Alignment** – Default seek/speed/volume steps now match the README so shortcut descriptions reflect actual behavior.
-3. **Control UX** – Cross-tab media targeting logic is more robust, keeping background tabs steady and reducing unintended focus switches.
+<ol>
+<li><strong>Customizable Shortcuts</strong> – Options page now features a keymap table that captures combos, warns about conflicts, and persists them to <code>storage.sync</code>; content scripts pick up changes instantly and the HUD plus docs stay aligned.</li>
+<li><strong>Step &amp; Docs Alignment</strong> – Default seek/speed/volume steps now match the README so shortcut descriptions reflect actual behavior.</li>
+<li><strong>Control UX</strong> – Cross-tab media targeting logic is more robust, keeping background tabs steady and reducing unintended focus switches.</li>
+</ol>
 
 ### 修复 / Fixes
 - 解决 HUD 多次触发时重叠显示的问题，确保提示面板仅存在一份 / Prevent HUD from overlaying itself on repeated triggers.
@@ -64,15 +66,17 @@
 8. **曲线平滑**：降低默认 Q 以减少窄带重叠产生的“鼓包/锯齿”。
 9. **标签自适应**：自动缩写与压缩防止布局溢出。
 
-1. **10-Band EQ & True Response** – Uses `getFrequencyResponse` to reflect actual overlapping filter output.
-2. **Unified Canvas** – Merged separate visualization layers to reduce repaint overhead and improve clarity.
-3. **Spectrum + History** – Captures EMA-smoothed instantaneous bars plus min/max envelope for contextual range.
-4. **Adaptive dB Range** – Auto-determines vertical scale to avoid clipping / wasted space; generates human-readable ticks.
-5. **Global Q** – User-adjustable bandwidth; serialized with presets (legacy presets fallback gracefully).
-6. **Playback Speed Badge** – Per-tab badge (e.g. `.75`, `1.25`, `2`) shown only when rate ≠ 1×; coexists with red EQ-modified icon.
-7. **HUD Improvements** – Seek highlight clears correctly; background polling only when active tab differs; live streams show informative state instead of invalid seeks.
-8. **Curve Smoothing** – Lower default Q reduces comb/bump artifacts from narrow overlap.
-9. **Label Responsiveness** – Abbreviation and compression prevent layout overflow.
+<ol>
+<li><strong>10-Band EQ &amp; True Response</strong> – Uses <code>getFrequencyResponse</code> to reflect actual overlapping filter output.</li>
+<li><strong>Unified Canvas</strong> – Merged separate visualization layers to reduce repaint overhead and improve clarity.</li>
+<li><strong>Spectrum + History</strong> – Captures EMA-smoothed instantaneous bars plus min/max envelope for contextual range.</li>
+<li><strong>Adaptive dB Range</strong> – Auto-determines vertical scale to avoid clipping / wasted space; generates human-readable ticks.</li>
+<li><strong>Global Q</strong> – User-adjustable bandwidth; serialized with presets (legacy presets fallback gracefully).</li>
+<li><strong>Playback Speed Badge</strong> – Per-tab badge (e.g. <code>.75</code>, <code>1.25</code>, <code>2</code>) shown only when rate ≠ 1×; coexists with red EQ-modified icon.</li>
+<li><strong>HUD Improvements</strong> – Seek highlight clears correctly; background polling only when active tab differs; live streams show informative state instead of invalid seeks.</li>
+<li><strong>Curve Smoothing</strong> – Lower default Q reduces comb/bump artifacts from narrow overlap.</li>
+<li><strong>Label Responsiveness</strong> – Abbreviation and compression prevent layout overflow.</li>
+</ol>
 
 ![EQ Popup](docs/imgs/popup-eq.png)
 

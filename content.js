@@ -535,14 +535,24 @@
     el.wrap.style.opacity = '1';
     STATE.overlayVisible = true;
     STATE.isRemoteOverlay = false; // 本地触发，标记为非远程
-    const cur = media.currentTime || 0;
-    const durRaw = isFinite(media.duration) ? media.duration : cur + 1;
-    const pct = durRaw ? (cur / durRaw) * 100 : 0;
-  el.barFill.style.width = pct.toFixed(3) + '%';
-  STATE.progressBarContext = { isLive: false, preview: false };
-  applyBarFillColor(el.barFill, STATE.progressBarContext);
-    el.left.textContent = formatTime(cur);
-    el.right.textContent = isFinite(media.duration) ? formatTime(media.duration) : '--:--';
+    let cur = media.currentTime || 0;
+    let durRaw = isFinite(media.duration) ? media.duration : cur + 1;
+    let pct = durRaw ? (cur / durRaw) * 100 : 0;
+    let isLive = !isFinite(media.duration);
+    if (isLive) {
+      pct = 50;
+      STATE.progressBarContext = { isLive: true, preview: false };
+      applyBarFillColor(el.barFill, STATE.progressBarContext);
+      el.barFill.style.width = '50%';
+      el.left.textContent = '直播';
+      el.right.textContent = '直播';
+    } else {
+      STATE.progressBarContext = { isLive: false, preview: false };
+      applyBarFillColor(el.barFill, STATE.progressBarContext);
+      el.barFill.style.width = pct.toFixed(3) + '%';
+      el.left.textContent = formatTime(cur);
+      el.right.textContent = isFinite(media.duration) ? formatTime(media.duration) : '--:--';
+    }
     // 统一使用“富卡片”布局：标题行 + 状态行
     while (el.center.firstChild) el.center.removeChild(el.center.firstChild);
     el.center.style.display = 'flex';
@@ -795,14 +805,24 @@
     el.wrap.style.opacity = '1';
     STATE.overlayVisible = true;
     STATE.isRemoteOverlay = false; // 本地微调，标记为非远程
-    const cur = media.currentTime || 0;
-    const dur = isFinite(media.duration) ? media.duration : cur + 1;
-    const pct = dur ? (cur / dur) * 100 : 0;
-  el.barFill.style.width = pct.toFixed(3) + '%';
-  STATE.progressBarContext = { isLive: false, preview: false };
-  applyBarFillColor(el.barFill, STATE.progressBarContext);
-    el.left.textContent = formatTime(cur);
-    el.right.textContent = isFinite(media.duration) ? formatTime(media.duration) : '--:--';
+    let cur = media.currentTime || 0;
+    let dur = isFinite(media.duration) ? media.duration : cur + 1;
+    let pct = dur ? (cur / dur) * 100 : 0;
+    let isLive = !isFinite(media.duration);
+    if (isLive) {
+      pct = 50;
+      STATE.progressBarContext = { isLive: true, preview: false };
+      applyBarFillColor(el.barFill, STATE.progressBarContext);
+      el.barFill.style.width = '50%';
+      el.left.textContent = '直播';
+      el.right.textContent = '直播';
+    } else {
+      STATE.progressBarContext = { isLive: false, preview: false };
+      applyBarFillColor(el.barFill, STATE.progressBarContext);
+      el.barFill.style.width = pct.toFixed(3) + '%';
+      el.left.textContent = formatTime(cur);
+      el.right.textContent = isFinite(media.duration) ? formatTime(media.duration) : '--:--';
+    }
     // 使用与卡片A一致的富卡片布局，并在标题中标注微调步长
     while (el.center.firstChild) el.center.removeChild(el.center.firstChild);
     el.center.style.display = 'flex';
@@ -924,19 +944,28 @@
     STATE.progressRafId = 0;
     if (!STATE.overlayVisible) return;
     try {
-      // 本地手动拖动(localSeeking)时允许实时刷新；远程预览或显式抑制时暂停本地刷新
       if (((!STATE.seekPreviewActive) || STATE.localSeeking) && !STATE.isRemoteOverlay) {
         const media = getActiveMedia();
         if (media) {
           const el = ensureFineOverlay();
-          const cur = media.currentTime || 0;
-          const dur = isFinite(media.duration) ? media.duration : cur + 1;
-          const pct = dur ? (cur / dur) * 100 : 0;
-          el.barFill.style.width = pct.toFixed(3) + '%';
-          el.left.textContent = formatTime(cur);
-          el.right.textContent = isFinite(media.duration) ? formatTime(media.duration) : '--:--';
-          STATE.progressBarContext = { isLive: false, preview: false };
-          applyBarFillColor(el.barFill, STATE.progressBarContext);
+          let cur = media.currentTime || 0;
+          let dur = isFinite(media.duration) ? media.duration : cur + 1;
+          let pct = dur ? (cur / dur) * 100 : 0;
+          let isLive = !isFinite(media.duration);
+          if (isLive) {
+            pct = 50;
+            STATE.progressBarContext = { isLive: true, preview: false };
+            applyBarFillColor(el.barFill, STATE.progressBarContext);
+            el.barFill.style.width = '50%';
+            el.left.textContent = '直播';
+            el.right.textContent = '直播';
+          } else {
+            STATE.progressBarContext = { isLive: false, preview: false };
+            applyBarFillColor(el.barFill, STATE.progressBarContext);
+            el.barFill.style.width = pct.toFixed(3) + '%';
+            el.left.textContent = formatTime(cur);
+            el.right.textContent = isFinite(media.duration) ? formatTime(media.duration) : '--:--';
+          }
         }
       }
     } catch {}

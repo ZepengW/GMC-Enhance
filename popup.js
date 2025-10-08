@@ -134,9 +134,9 @@ function renderMediaList(mediaList) {
         <button class="media-btn media-eq-toggle" title="音效均衡(EQ)">🎶</button>
       </div>
       <div class="media-progress">
-        <span class="media-time">${info.currentTime}</span> / <span class="media-duration">${isLive ? '直播' : info.duration}</span>
+        <span class="media-time">${isLive ? '--:--' : info.currentTime}</span> / <span class="media-duration">${isLive ? '--:--' : info.duration}</span>
       </div>
-      <input type="range" class="seek-bar" min="0" max="${info.rawDuration}" value="${info.rawCurrentTime}" step="0.01" ${isLive || !isFinite(info.rawDuration) ? 'disabled' : ''}>
+      <input type="range" class="seek-bar" min="0" max="${isLive ? '100' : info.rawDuration}" value="${isLive ? '50' : info.rawCurrentTime}" step="0.01" ${isLive || !isFinite(info.rawDuration) ? 'disabled' : ''} style="${isLive ? 'background:linear-gradient(90deg,#ff5252,#ff1744);' : ''}">
       <div class="eq-panel" style="display:none;margin-top:10px;border-top:1px solid #eee;padding-top:8px;">
         <div class="eq-presets" style="display:flex;align-items:center;gap:4px;margin-bottom:6px;flex-wrap:wrap;">
           <select class="eq-preset-select" style="flex:1;min-width:120px;font-size:12px;padding:3px 4px;"></select>
@@ -1169,10 +1169,19 @@ async function refreshMediaList(full = false) {
       const locked = seekLocks.has(String(tab.id)) || seekAccum.has(tab.id);
       // 若该卡片在拖动锁中，跳过时间与进度条更新，避免冲突
       if (!locked) {
-        card.querySelector('.media-time').textContent = info.currentTime;
-        card.querySelector('.media-duration').textContent = info.duration;
+  const isLive = !!info.isLive;
+  card.querySelector('.media-time').textContent = isLive ? '--:--' : info.currentTime;
+  card.querySelector('.media-duration').textContent = isLive ? '--:--' : info.duration;
         const seekBar = card.querySelector('.seek-bar');
-        if (seekBar) seekBar.value = info.rawCurrentTime;
+        if (seekBar) {
+          if (isLive) {
+            seekBar.value = 50;
+            seekBar.style.background = 'linear-gradient(90deg,#ff5252,#ff1744)';
+          } else {
+            seekBar.value = info.rawCurrentTime;
+            seekBar.style.background = '';
+          }
+        }
       }
       // 播放状态仍可更新（不影响拖动体验）
       const playBtn = card.querySelector('.media-play');

@@ -1,6 +1,6 @@
 <!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>GMC-Enhance 选项</title>
-<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:24px}.card{max-width:620px;background:#fff;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.08);padding:20px}label{display:block;margin:12px 0 6px;color:#333}input{width:100%;padding:10px 12px;border-radius:10px;border:1px solid #ddd}small{color:#666}button{margin-top:16px;padding:10px 14px;border:0;background:#1a73e8;color:#fff;border-radius:10px;cursor:pointer}.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}h1{font-size:20px;margin:0 0 16px}ul{line-height:1.8}code{background:#f5f5f7;padding:2px 6px;border-radius:6px}</style>
+<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:24px}.card{max-width:720px;background:#fff;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.08);padding:20px}label{display:block;margin:12px 0 6px;color:#333}input{width:100%;padding:10px 12px;border-radius:10px;border:1px solid #ddd;box-sizing:border-box}small{color:#666}button{margin-top:16px;padding:10px 14px;border:0;background:#1a73e8;color:#fff;border-radius:10px;cursor:pointer}.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}h1{font-size:20px;margin:0 0 16px}h3{margin-top:24px}ul{line-height:1.8}code{background:#f5f5f7;padding:2px 6px;border-radius:6px}.keymap-table{width:100%;border-collapse:collapse;margin-top:12px}.keymap-table th,.keymap-table td{border-bottom:1px solid #eee;padding:10px 8px;text-align:left;font-size:13px}.keymap-table td:nth-child(2){width:220px}.key-input{background:#fafafa;cursor:text}.key-input:focus{outline:none;border-color:#1a73e8;background:#fff}.key-input.key-conflict{border-color:#d93025;background:#fff5f5}.hint{margin-top:8px;color:#555}.secondary{background:#5f6368}.secondary:hover,.secondary:focus{background:#4a4f55}</style>
 </head><body><div class="card"><h1>GMC-Enhance 设置</h1><div class="row">
 <div><label>快进/快退步长（秒）</label><input id="seekStep" type="number" min="1" step="1" value="15"><small>适用于快捷键 J / L（Alt+Shift+J / Alt+Shift+L）</small></div>
 <div><label>倍速步长（±）</label><input id="speedStep" type="number" min="0.05" step="0.05" value="0.5"><small>适用于快捷键 U / O（Alt+Shift+U / Alt+Shift+O）；Alt+Shift+I 重置</small></div>
@@ -16,7 +16,16 @@
 <li><b>快退/快进</b>：Alt+Shift+J / Alt+Shift+L（步长见上方设置）</li>
 <li><b>减速/加速</b>：Alt+Shift+U / Alt+Shift+O（步长见上方设置）</li>
 <li><b>重置倍速</b>：Alt+Shift+I</li>
-<li><b>音量- / 音量+</b>：Alt+Shift+< / Alt+Shift+>（步长见上方设置）</li>
+<li><b>音量- / 音量+</b>：Alt+Shift+&lt; / Alt+Shift+&gt;（步长见上方设置）</li>
 <li><b>静音/恢复</b>：Alt+Shift+M</li>
 <li><b>截图</b>：Alt+Shift+S</li>
-</ul></div><script src="options.js"></script></body></html>
+<li><b>循环倍速</b>：Alt+Shift+P（在预设倍速间切换）</li>
+</ul>
+<h3>自定义快捷键</h3>
+<p class="hint">点击下方输入框并按下组合键，自定义每个操作的触发键。Esc 取消，Backspace 清除，留空表示继续使用默认配置。</p>
+<table class="keymap-table">
+<thead><tr><th>操作</th><th>快捷键</th><th>说明</th></tr></thead>
+<tbody id="keymap-tbody"></tbody>
+</table>
+<button id="resetKeymap" class="secondary">恢复默认快捷键</button>
+</div><script src="options.js"></script></body></html>

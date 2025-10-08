@@ -1,4 +1,22 @@
 (() => {
+  const DEFAULT_KEYMAP = Object.freeze({
+    cycleVideo: 'Alt+Shift+KeyV',
+    togglePlayPause: 'Alt+Shift+KeyK',
+    seekBack: 'Alt+Shift+KeyJ',
+    seekForward: 'Alt+Shift+KeyL',
+    volumeDown: 'Alt+Shift+Comma',
+    volumeUp: 'Alt+Shift+Period',
+    toggleMute: 'Alt+Shift+KeyM',
+    speedDown: 'Alt+Shift+KeyU',
+    speedUp: 'Alt+Shift+KeyO',
+    speedReset: 'Alt+Shift+KeyI',
+    speedCycle: 'Alt+Shift+KeyP',
+    screenshot: 'Alt+Shift+KeyS'
+  });
+  const MODIFIER_ORDER = ['Control', 'Alt', 'Shift', 'Meta'];
+  const MODIFIER_PROP = { Control: 'ctrlKey', Alt: 'altKey', Shift: 'shiftKey', Meta: 'metaKey' };
+  const MODIFIER_CODE_SET = new Set(['ShiftLeft','ShiftRight','AltLeft','AltRight','ControlLeft','ControlRight','MetaLeft','MetaRight']);
+
   const STATE = {
   seekStep: 15,
   speedStep: 0.5,
@@ -23,7 +41,9 @@
     progressRafId: 0,
     progressHighlightTimer: null,
     progressHighlightActive: false,
-    progressHighlightPersistent: false,
+  progressHighlightPersistent: false,
+  keymap: { ...DEFAULT_KEYMAP },
+  keymapLookup: {},
     globalMediaMeta: { index: 0, total: 0 },
   progressBarContext: { isLive: false, preview: false },
   overlayMedia: null,
@@ -34,6 +54,39 @@
     extensionSeeking: false, // 扩展内部触发的 seek（允许 HUD）
     overlayEverShown: false
   };
+
+  function applyKeymap(overrides) {
+    const merged = { ...DEFAULT_KEYMAP };
+    if (overrides && typeof overrides === 'object') {
+      Object.entries(overrides).forEach(([action, combo]) => {
+        if (typeof combo === 'string' && combo.trim()) {
+          merged[action] = combo.trim();
+        }
+      });
+    }
+    STATE.keymap = merged;
+    STATE.keymapLookup = {};
+    Object.entries(merged).forEach(([action, combo]) => {
+      STATE.keymapLookup[combo] = action;
+    });
+  }
+
+  function buildComboFromEvent(e) {
+    if (!e || typeof e !== 'object') return '';
+    const parts = [];
+    for (const mod of MODIFIER_ORDER) {
+      if (e[MODIFIER_PROP[mod]]) parts.push(mod);
+    }
+    const code = e.code;
+    if (!code) return parts.length ? parts.join('+') : '';
+    if (MODIFIER_CODE_SET.has(code)) {
+      return parts.length ? parts.join('+') : '';
+    }
+    parts.push(code);
+    return parts.join('+');
+  }
+
+  applyKeymap();
   // ====== EQ 状态 ======
   const EQ = {
     ctx: null,
@@ -345,9 +398,16 @@
   function saveCustomPresets() {
     chrome.storage.sync.set({ eqCustomPresets: EQ.customPresets.slice(0,40) });
   }
-  chrome.storage.sync.get({ seekStep: 15, speedStep: 0.5 }, (cfg) => {
+  chrome.storage.sync.get({ seekStep: 15, speedStep: 0.5, keymap: {} }, (cfg) => {
     STATE.seekStep = Number(cfg.seekStep) || 15;
     STATE.speedStep = Number(cfg.speedStep) || 0.5;
+    applyKeymap(cfg.keymap);
+  });
+
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'sync' && changes.keymap) {
+      applyKeymap(changes.keymap.newValue);
+    }
   });
   function collectVideos() {
     const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
@@ -981,83 +1041,83 @@
     }
   }
 
-  window.addEventListener('keydown', (e) => {
-    const t = e.target, editable = t && (t.isContentEditable || ['INPUT','TEXTAREA','SELECT'].includes(t.tagName));
-    if (editable) return;
-    if (e.altKey && e.shiftKey) {
-      let handled = false;
-      switch (e.code) {
-        // 将 V/J/K/L 转发给后台统一处理（即使 chrome.commands 不可用也可工作）
-        case 'KeyV': {
-          try { chrome.runtime.sendMessage({ type: 'gmcx-command', command: 'cycle-video' }); } catch {}
-          handled = true; e.preventDefault(); break; }
-        case 'KeyJ': {
-          // 先本地立即显示覆盖层，提升反馈速度
-          updateLocalOverlay({actionLabel: `快退 ${Math.abs(STATE.seekStep)}s`});
-          try { chrome.runtime.sendMessage({ type: 'gmcx-command', command: 'seek-back' }); } catch {}
-          handled = true; e.preventDefault(); break; }
-        case 'KeyK': {
-          // 先本地立即显示覆盖层（不改变状态，仅提示）
-          try {
-            const m = getActiveMedia();
-            if (m) updateLocalOverlay({actionLabel: m.paused ? '播放' : '暂停'});
-          } catch {}
-          try { chrome.runtime.sendMessage({ type: 'gmcx-command', command: 'toggle-play-pause' }); } catch {}
-          handled = true; e.preventDefault(); break; }
-        case 'KeyL': {
-          // 先本地立即显示覆盖层，提升反馈速度
-          updateLocalOverlay({actionLabel: `快进 ${Math.abs(STATE.seekStep)}s`});
-          try { chrome.runtime.sendMessage({ type: 'gmcx-command', command: 'seek-forward' }); } catch {}
-          handled = true; e.preventDefault(); break; }
-        // 其他按键保留原处理
-        case 'Comma': { // Alt+Shift+< 音量降低
-          chrome.runtime.sendMessage({type:'gmcx-global-volume', action:'down'});
-          handled = true; e.preventDefault(); break; }
-        case 'Period': { // Alt+Shift+> 音量增加
-          chrome.runtime.sendMessage({type:'gmcx-global-volume', action:'up'});
-          handled = true; e.preventDefault(); break; }
-        case 'KeyM': { // 静音/取消静音（后台会基于全局/当前活动自动定位）
-          try {
-            chrome.runtime.sendMessage({ type: 'gmcx-toggle-mute' }, (resp) => {
-              if (!resp || !resp.ok) {
-                const media = getActiveMedia();
-                if (media) {
-                  media.muted = !media.muted;
-                  updateLocalOverlay({actionLabel: media.muted ? '静音' : '取消静音'});
-                }
-              }
-            });
-          } catch {
+  const KEYBOARD_ACTIONS = {
+    cycleVideo() {
+      try { chrome.runtime.sendMessage({ type: 'gmcx-command', command: 'cycle-video' }); } catch {}
+    },
+    seekBack() {
+      updateLocalOverlay();
+      flashProgressHighlight();
+      try { chrome.runtime.sendMessage({ type: 'gmcx-command', command: 'seek-back' }); } catch {}
+    },
+    togglePlayPause() {
+      try {
+        const media = getActiveMedia();
+        if (media) updateLocalOverlay();
+      } catch {}
+      try { chrome.runtime.sendMessage({ type: 'gmcx-command', command: 'toggle-play-pause' }); } catch {}
+    },
+    seekForward() {
+      updateLocalOverlay();
+      flashProgressHighlight();
+      try { chrome.runtime.sendMessage({ type: 'gmcx-command', command: 'seek-forward' }); } catch {}
+    },
+    volumeDown() {
+      chrome.runtime.sendMessage({ type: 'gmcx-global-volume', action: 'down' });
+    },
+    volumeUp() {
+      chrome.runtime.sendMessage({ type: 'gmcx-global-volume', action: 'up' });
+    },
+    toggleMute() {
+      try {
+        chrome.runtime.sendMessage({ type: 'gmcx-toggle-mute' }, (resp) => {
+          if (!resp || !resp.ok) {
             const media = getActiveMedia();
             if (media) {
               media.muted = !media.muted;
-              updateLocalOverlay({actionLabel: media.muted ? '静音' : '取消静音'});
+              updateLocalOverlay();
             }
           }
-          handled = true; e.preventDefault(); break;
+        });
+      } catch {
+        const media = getActiveMedia();
+        if (media) {
+          media.muted = !media.muted;
+          updateLocalOverlay();
         }
-        case 'KeyU': { // 全局减速
-          chrome.runtime.sendMessage({type:'gmcx-global-speed', action:'down'});
-          handled = true; e.preventDefault(); break; }
-        case 'KeyO': { // 全局加速
-          chrome.runtime.sendMessage({type:'gmcx-global-speed', action:'up'});
-          handled = true; e.preventDefault(); break; }
-        case 'KeyI': { // 重置 1x
-          chrome.runtime.sendMessage({type:'gmcx-global-speed', action:'reset'});
-          handled = true; e.preventDefault(); break; }
-        case 'KeyP': { // 循环预设
-          chrome.runtime.sendMessage({type:'gmcx-global-speed', action:'cycle'});
-          handled = true; e.preventDefault(); break; }
-        case 'KeyS': { // 截图（本地行为，不影响全局）
-          screenshotVideo();
-          handled = true; e.preventDefault(); break; }
-        default:
-          // 其余 Alt+Shift 组合不在内容脚本处理，交给浏览器命令（如 V/J/K/L）
-          break;
       }
-      // 仅当确实由我们处理时，才阻止事件冒泡，避免影响 chrome.commands
-      if (handled) e.stopImmediatePropagation();
+    },
+    speedDown() {
+      chrome.runtime.sendMessage({ type: 'gmcx-global-speed', action: 'down' });
+    },
+    speedUp() {
+      chrome.runtime.sendMessage({ type: 'gmcx-global-speed', action: 'up' });
+    },
+    speedReset() {
+      chrome.runtime.sendMessage({ type: 'gmcx-global-speed', action: 'reset' });
+    },
+    speedCycle() {
+      chrome.runtime.sendMessage({ type: 'gmcx-global-speed', action: 'cycle' });
+    },
+    screenshot() {
+      screenshotVideo();
     }
+  };
+
+  window.addEventListener('keydown', (e) => {
+    const t = e.target;
+    const editable = t && (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName));
+    if (editable) return;
+    if (e.repeat) return;
+    const combo = buildComboFromEvent(e);
+    if (!combo) return;
+    const actionKey = STATE.keymapLookup[combo];
+    if (!actionKey) return;
+    const handler = KEYBOARD_ACTIONS[actionKey];
+    if (!handler) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    handler();
   }, true);
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {

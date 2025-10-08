@@ -34,7 +34,7 @@ GMC-Enhance offers:
 - **Unified Media Control** – One toolbar entry for all audible media.
 - **Playback & Seeking** – Play / pause / backward / forward (configurable step).
 - **Speed Management** – Increment/decrement, reset, preset cycling + per‑tab speed badge (hidden at 1×).
-- **Global Shortcuts** – Seek, speed, volume, mute, target selection.
+- **Global Shortcuts** – Seek, speed, volume, mute, target selection with customizable mappings.
 - **Independent Tab Sessions** – Each tab keeps its own state (speed / volume / EQ).
 - **Volume & Mute** – Fine‑grained steps and quick mute toggle.
 - **Equalizer (10-Band)** – Core frequency shaping with presets.
@@ -68,7 +68,7 @@ Features include:
 
 ### 3. Shortcuts
 
-GMC-Enhance supports the following keyboard shortcuts for fast, interruption‑free media control. Custom shortcuts can be set (right-click the image and click "Options").
+GMC-Enhance supports the following keyboard shortcuts for fast, interruption‑free media control. Visit the extension Options page to assign custom combinations for each action; conflicts are detected automatically and you can revert to defaults with one click.
 
 | Action                  | Shortcut            | Description                                                                                                      |
 |------------------------|---------------------|------------------------------------------------------------------------------------------------------------------|
@@ -79,7 +79,7 @@ GMC-Enhance supports the following keyboard shortcuts for fast, interruption‑f
 | Speed Up                | `Alt + Shift + O`   | Increase playback speed (default: +0.5x).                                                                        |
 | Speed Down              | `Alt + Shift + U`   | Decrease playback speed (default: -0.5x).                                                                        |
 | Reset Speed             | `Alt + Shift + I`   | Reset playback speed to normal (default: 1x).                                                                    |
-| Set Speed               | `Alt + Shift + P`   | Cycle through preset playback speeds.                                                                            |
+| Cycle Preset Speed      | `Alt + Shift + P`   | Cycle through preset playback speeds.                                                                            |
 | Volume Up               | `Alt + Shift + >`   | Increase volume (default: +10%).                                                                                 |
 | Volume Down             | `Alt + Shift + <`   | Decrease volume (default: -10%).                                                                                 |
 | Mute/Unmute             | `Alt + Shift + M`   | Toggle mute/unmute.                                                                                              |
@@ -87,7 +87,7 @@ GMC-Enhance supports the following keyboard shortcuts for fast, interruption‑f
 
 ![Floating Video Control](docs/imgs/video_float_card.gif)
 
-**Tip**: By mapping shortcuts to a keyboard knob, you can achieve precise control over video progress, which was the inspiration behind this extension.
+**Tip**: By mapping shortcuts to a keyboard knob, you can achieve precise control over video progress, which was the inspiration behind this extension. Open “Manage Extensions → GMC-Enhance → Options” to capture new shortcut combinations or restore the default layout.
 
 ### 4. Icon Badges & Visual Cues
 
@@ -144,4 +144,4 @@ GMC-Enhance requests the minimum permissions required for its features:
 
 - `activeTab`: Required to interact with the current tab when the user invokes the extension UI and for capturing the visible tab for screenshots.
 - `tabs`: Needed to enumerate tabs and message them for media info/control.
-- `storage`: Saves preferences like seek/speed steps, EQ presets, and volume step.
+- `storage`: Saves preferences like seek/speed steps, EQ presets, volume step, and shortcut mappings.

@@ -79,6 +79,7 @@ GMC-Enhance 支持以下键盘快捷键，用于快速、无干扰的媒体控�
 | 增加音量              | `Alt + Shift + >`   | 增加音量（默认：+10%）。                                                                                 |
 | 减少音量              | `Alt + Shift + <`   | 减少音量（默认：-10%）。                                                                                 |
 | 静音/取消静音         | `Alt + Shift + M`   | 切换静音/取消静音。                                                                                       |
+| 视频截屏              | `Alt + Shift + S`   | 对当前选中视频截取一帧（优先原始分辨率，若受限则退回捕获可见区域）。                                               |
 
 ![Floating Video Control](docs/imgs/video_float_card.gif)
 

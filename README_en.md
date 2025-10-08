@@ -83,6 +83,7 @@ GMC-Enhance supports the following keyboard shortcuts for fast, interruption‑f
 | Volume Up               | `Alt + Shift + >`   | Increase volume (default: +10%).                                                                                 |
 | Volume Down             | `Alt + Shift + <`   | Decrease volume (default: -10%).                                                                                 |
 | Mute/Unmute             | `Alt + Shift + M`   | Toggle mute/unmute.                                                                                              |
+| Capture Frame           | `Alt + Shift + S`   | Capture a frame from the selected video (tries native resolution first, falls back to visible area grab).        |
 
 ![Floating Video Control](docs/imgs/video_float_card.gif)
 

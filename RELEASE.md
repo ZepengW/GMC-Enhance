@@ -2,9 +2,34 @@
 
 > 累积版本更新记录（Cumulative Changelog）
 >
-> 最新版本：v0.3.0  (2025-10-04)
+> 最新版本：v0.3.1  (2025-10-08)
 
 ---
+## v0.3.1 (2025-10-08)
+
+### 更新摘要 / Highlights
+- 自定义快捷键映射（选项页可视化配置 + 即时应用）
+- 快捷键冲突检测、重置默认与步长配置联动
+- HUD 叠加、直播进度条与跨标签控制体验修复
+
+- Customizable keyboard mapping (options UI with live application)
+- Shortcut conflict detection, one-click reset, and step-size alignment
+- Fixes for stacked HUDs, live-progress handling, and cross-tab control
+
+### 详细说明 / Details
+1. **快捷键自定义 / Customizable Shortcuts**：新增选项页快捷键表格，可捕获组合键、提示冲突、写入 `storage.sync`，内容脚本实时载入，HUD 操作与文档同步更新。
+2. **步长与文案同步 / Step & Docs Alignment**：默认快进/速度/音量步长与 README 统一，避免快捷键说明与实际行为不一致。
+3. **控制体验优化 / Control UX**：改进跨标签媒体控制的目标锁定逻辑，使后台标签响应更稳定，减少误切换。
+
+1. **Customizable Shortcuts** – Options page now features a keymap table that captures combos, warns about conflicts, and persists them to `storage.sync`; content scripts pick up changes instantly and the HUD plus docs stay aligned.
+2. **Step & Docs Alignment** – Default seek/speed/volume steps now match the README so shortcut descriptions reflect actual behavior.
+3. **Control UX** – Cross-tab media targeting logic is more robust, keeping background tabs steady and reducing unintended focus switches.
+
+### 修复 / Fixes
+- 解决 HUD 多次触发时重叠显示的问题，确保提示面板仅存在一份 / Prevent HUD from overlaying itself on repeated triggers.
+- 当监测到直播源时固定进度条展示，避免 seek 逻辑造成跳动假象 / Keep live-stream progress static to avoid misleading jumps.
+- 调整倍速调节快捷键映射，修正键位与实际动作错位 / Corrected speed-control shortcut mapping mismatch.
+
 ## v0.3.0 (2025-10-04)
 
 ### 更新摘要 / Highlights

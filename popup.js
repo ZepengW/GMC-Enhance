@@ -6,8 +6,8 @@ function sendToTab(tabId, msg) {
 }
 
 // 配置：从 options 继承快进/快退步长
-let SEEK_STEP = 5;
-chrome.storage.sync.get({ seekStep: 5 }, (cfg) => {
+let SEEK_STEP = 15;
+chrome.storage.sync.get({ seekStep: 15 }, (cfg) => {
   const v = Number(cfg.seekStep);
   if (v && v > 0) SEEK_STEP = v;
 });

@@ -1,7 +1,7 @@
 (() => {
   const STATE = {
-    seekStep: 5,
-    speedStep: 0.25,
+  seekStep: 15,
+  speedStep: 0.5,
     selectHudEl: null,
   videosCache: [],
     selectedIndex: 0,
@@ -345,9 +345,9 @@
   function saveCustomPresets() {
     chrome.storage.sync.set({ eqCustomPresets: EQ.customPresets.slice(0,40) });
   }
-  chrome.storage.sync.get({ seekStep: 5, speedStep: 0.25 }, (cfg) => {
-    STATE.seekStep = Number(cfg.seekStep) || 5;
-    STATE.speedStep = Number(cfg.speedStep) || 0.25;
+  chrome.storage.sync.get({ seekStep: 15, speedStep: 0.5 }, (cfg) => {
+    STATE.seekStep = Number(cfg.seekStep) || 15;
+    STATE.speedStep = Number(cfg.speedStep) || 0.5;
   });
   function collectVideos() {
     const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
@@ -1038,11 +1038,11 @@
           }
           handled = true; e.preventDefault(); break;
         }
-        case 'KeyU': { // 全局加速
-          chrome.runtime.sendMessage({type:'gmcx-global-speed', action:'up'});
-          handled = true; e.preventDefault(); break; }
-        case 'KeyO': { // 全局减速
+        case 'KeyU': { // 全局减速
           chrome.runtime.sendMessage({type:'gmcx-global-speed', action:'down'});
+          handled = true; e.preventDefault(); break; }
+        case 'KeyO': { // 全局加速
+          chrome.runtime.sendMessage({type:'gmcx-global-speed', action:'up'});
           handled = true; e.preventDefault(); break; }
         case 'KeyI': { // 重置 1x
           chrome.runtime.sendMessage({type:'gmcx-global-speed', action:'reset'});

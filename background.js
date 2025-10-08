@@ -25,12 +25,12 @@ const GLOBAL_MEDIA = {
   seekDebounce: 550,
   baseTime: null, // 最近一次实际 currentTime 基准
   pendingRefreshAfterSwitch: false,
-  seekStep: 5,
-  speedStep: 0.25,
+  seekStep: 15,
+  speedStep: 0.5,
   speedPresets: [0.75, 1, 1.25, 1.5, 2],
   speedPresetIndex: 1,
   forceGlobal: false, // 在用户使用 cycle-video 后强制使用全局控制；未 force 时默认聚焦当前活动标签媒体
-  volumeStep: 0.05,
+  volumeStep: 0.1,
   overlaySeq: 0,
   seekOpId: 0,
   currentSeekOpId: 0
@@ -660,7 +660,7 @@ async function cyclePlaybackPreset() {
 }
 
 function loadSpeedSettings() {
-  chrome.storage.sync.get({ seekStep: 5, speedStep: 0.25, volumeStep: 0.05 }, (cfg) => {
+  chrome.storage.sync.get({ seekStep: 15, speedStep: 0.5, volumeStep: 0.1 }, (cfg) => {
     const sstep = Number(cfg.seekStep);
     if (sstep && sstep > 0) GLOBAL_MEDIA.seekStep = sstep;
     const step = Number(cfg.speedStep);

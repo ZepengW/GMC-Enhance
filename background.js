@@ -54,6 +54,7 @@ async function startOverlayWatch() {
     if (active && active.id === entry.tab.id) return;
     OVERLAY_WATCH_TIMER = setInterval(async () => {
       try {
+        if (GLOBAL_MEDIA.seekAccumDelta !== 0) return; // Skip sync while preview seek is pending
         const info = await sendToTab(entry.tab.id, { type: 'gmcx-get-media-info' });
         if (info && info.ok) {
           overlayUpdateOnActive({

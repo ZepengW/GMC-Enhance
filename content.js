@@ -24,6 +24,7 @@
     progressHighlightTimer: null,
     progressHighlightActive: false,
     progressHighlightPersistent: false,
+    globalMediaMeta: { index: 0, total: 0 },
   progressBarContext: { isLive: false, preview: false },
   overlayMedia: null,
   overlayMediaTimeHandler: null,
@@ -476,6 +477,21 @@
     if (/^视频\s+\d+x\d+$/i.test(name) || name === '音频') return '本页媒体';
     return name.slice(0, 120);
   }
+  function getIndexPrefix() {
+    try {
+      if (STATE.globalMediaMeta && STATE.globalMediaMeta.total > 0) {
+        const total = STATE.globalMediaMeta.total;
+        const idx = Math.min(Math.max(STATE.globalMediaMeta.index || 1, 1), total);
+        return `[${idx}/${total}] `;
+      }
+      const total = STATE.videosCache.length || collectVideos().length;
+      if (total) {
+        const idx = Math.min(STATE.selectedIndex + 1, total);
+        return `[${idx}/${total}] `;
+      }
+    } catch {}
+    return '';
+  }
   function cycleSelectedMedia() {
     STATE.videosCache = collectVideos();
     if (!STATE.videosCache.length) {
@@ -511,9 +527,11 @@
   // showHUD removed; use showSelectHUD for brief toasts
   // 统一：本地控制也使用底部 fine overlay，而不再使用顶部 HUD 文本
   function updateLocalOverlay(extra = {}) {
+    if (STATE.isRemoteOverlay && !extra.allowRemoteOverride) return; // Skip if remote HUD owns control
     const media = getActiveMedia();
     if (!media) return;
     const el = ensureFineOverlay();
+    STATE.overlayEverShown = true;
     el.wrap.style.opacity = '1';
     STATE.overlayVisible = true;
     STATE.isRemoteOverlay = false; // 本地触发，标记为非远程
@@ -539,16 +557,8 @@
     icon.style.flex = 'none';
     titleLine.appendChild(icon);
     const titleSpan = document.createElement('span');
-    let indexPrefix = '';
-    try {
-      // 与全局卡片一致：尝试显示 [当前/总数]
-      const total = STATE.videosCache.length || collectVideos().length;
-      if (total) {
-        const idx = Math.min(STATE.selectedIndex + 1, total);
-        indexPrefix = `[${idx}/${total}] `;
-      }
-    } catch {}
-  const name = getDisplayTitle(media);
+    const indexPrefix = getIndexPrefix();
+    const name = getDisplayTitle(media);
     const actionAffix = extra.actionLabel ? ` · ${extra.actionLabel}` : '';
     const fullTitle = (indexPrefix + name + actionAffix).slice(0, 120);
     titleSpan.textContent = fullTitle;
@@ -779,7 +789,9 @@
     return STATE.fineOverlayEl;
   }
   function updateFineOverlay(media) {
+    if (STATE.isRemoteOverlay) return; // Remote HUD active; avoid flash-back to local status
     const el = ensureFineOverlay();
+    STATE.overlayEverShown = true;
     el.wrap.style.opacity = '1';
     STATE.overlayVisible = true;
     STATE.isRemoteOverlay = false; // 本地微调，标记为非远程
@@ -805,9 +817,10 @@
     icon.style.flex = 'none';
     titleLine.appendChild(icon);
     const titleSpan = document.createElement('span');
-  const name = getDisplayTitle(media);
+    const indexPrefix = getIndexPrefix();
+    const name = getDisplayTitle(media);
     const affix = ` · 微调 ${STATE.fineSeekDir>0?'+':'-'}${STATE.fineSeekStep.toFixed(2)}s`;
-    const fullTitle = (name + affix).slice(0, 120);
+    const fullTitle = (indexPrefix + name + affix).slice(0, 120);
     titleSpan.textContent = fullTitle;
     titleSpan.title = fullTitle;
     titleSpan.style.cssText = 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;';
@@ -838,6 +851,8 @@
     STATE.overlayVisible = false;
     stopProgressTick();
     setProgressHighlight(false);
+    STATE.isRemoteOverlay = false;
+    STATE.globalMediaMeta = { index: 0, total: 0 };
     // 通知后台覆盖层已隐藏，用于恢复到本页优先控制
     try { chrome.runtime.sendMessage({type:'gmcx-overlay-hidden'}); } catch {}
   }
@@ -1051,8 +1066,9 @@
       }
   // 标记远程覆盖层状态（用于抑制本地 RAF 进度）
   // 仅在“预览”阶段阻止本地 RAF，最终/同步状态恢复本地 RAF
-  STATE.isRemoteOverlay = !!p.preview;
+  STATE.isRemoteOverlay = !!p.isRemote;
   const el = ensureFineOverlay();
+  STATE.overlayEverShown = true;
   el.wrap.style.opacity = '1';
   STATE.overlayVisible = true;
       while (el.center.firstChild) el.center.removeChild(el.center.firstChild);
@@ -1072,13 +1088,12 @@
       const titleSpan = document.createElement('span');
       let indexPrefix = '';
       if (typeof p.index === 'number' && typeof p.total === 'number' && p.total > 0) {
-        indexPrefix = `[${p.index}/${p.total}] `;
+        const safeIdx = Math.min(Math.max(p.index, 1), p.total);
+        STATE.globalMediaMeta = { index: safeIdx, total: p.total };
+        indexPrefix = `[${safeIdx}/${p.total}] `;
       } else {
-        try {
-          const current = resolveSelectedMedia();
-          const total = STATE.videosCache.length;
-          if (current && total) indexPrefix = `[${Math.min(STATE.selectedIndex + 1, total)}/${total}] `;
-        } catch {}
+        STATE.globalMediaMeta = { index: 0, total: 0 };
+        indexPrefix = getIndexPrefix();
       }
       const baseTitle = p.title || '全局控制';
       const fullTitle = indexPrefix + baseTitle;
@@ -1093,7 +1108,7 @@
         titleLine.appendChild(liveBadge);
       }
       el.center.appendChild(titleLine);
-      const statusLine = document.createElement('div');
+  const statusLine = document.createElement('div');
       statusLine.style.cssText = 'margin-top:4px;display:flex;align-items:center;gap:14px;font-variant-numeric:tabular-nums;font-size:11px;opacity:.9;';
       const rateSpan = document.createElement('span');
       rateSpan.textContent = (typeof p.playbackRate === 'number' ? p.playbackRate.toFixed(2) : '1.00') + 'x';
@@ -1226,7 +1241,7 @@
     
     // 5) 全局媒体探测（供后台扫描使用）
   if (msg?.type === 'gmcx-get-media-info') {
-      const blacklist = ['https://www.bilibili.com/','https://www.douyu.com/'];
+      const blacklist = [];
       if (blacklist.includes(window.location.href)) { sendResponse({ ok: false }); return; }
       if (window.top !== window.self) { sendResponse({ ok: false }); return; }
       const candidates = collectVideos();

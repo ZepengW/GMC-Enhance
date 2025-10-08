@@ -569,8 +569,7 @@
     const titleSpan = document.createElement('span');
     const indexPrefix = getIndexPrefix();
     const name = getDisplayTitle(media);
-    const actionAffix = extra.actionLabel ? ` · ${extra.actionLabel}` : '';
-    const fullTitle = (indexPrefix + name + actionAffix).slice(0, 120);
+  const fullTitle = (indexPrefix + name).slice(0, 120);
     titleSpan.textContent = fullTitle;
     titleSpan.title = fullTitle;
     titleSpan.style.cssText = 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;';
@@ -588,8 +587,8 @@
       else if (v > 33) volSpan.textContent = '🔉 ' + v + '%';
       else volSpan.textContent = '🔈 ' + v + '%';
     }
-    statusLine.appendChild(rateSpan);
-    statusLine.appendChild(volSpan);
+  statusLine.appendChild(rateSpan);
+  statusLine.appendChild(volSpan);
     el.center.appendChild(statusLine);
     if (el.prev) { el.prev.textContent = ''; el.prev.style.display = 'none'; }
     if (el.next) { el.next.textContent = ''; el.next.style.display = 'none'; }
@@ -839,8 +838,7 @@
     const titleSpan = document.createElement('span');
     const indexPrefix = getIndexPrefix();
     const name = getDisplayTitle(media);
-    const affix = ` · 微调 ${STATE.fineSeekDir>0?'+':'-'}${STATE.fineSeekStep.toFixed(2)}s`;
-    const fullTitle = (indexPrefix + name + affix).slice(0, 120);
+  const fullTitle = (indexPrefix + name).slice(0, 120);
     titleSpan.textContent = fullTitle;
     titleSpan.title = fullTitle;
     titleSpan.style.cssText = 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;';
@@ -944,27 +942,27 @@
     STATE.progressRafId = 0;
     if (!STATE.overlayVisible) return;
     try {
-      if (((!STATE.seekPreviewActive) || STATE.localSeeking) && !STATE.isRemoteOverlay) {
+      if (!STATE.isRemoteOverlay) {
         const media = getActiveMedia();
         if (media) {
           const el = ensureFineOverlay();
-          let cur = media.currentTime || 0;
-          let dur = isFinite(media.duration) ? media.duration : cur + 1;
-          let pct = dur ? (cur / dur) * 100 : 0;
-          let isLive = !isFinite(media.duration);
-          if (isLive) {
-            pct = 50;
-            STATE.progressBarContext = { isLive: true, preview: false };
-            applyBarFillColor(el.barFill, STATE.progressBarContext);
-            el.barFill.style.width = '50%';
-            el.left.textContent = '直播';
-            el.right.textContent = '直播';
-          } else {
-            STATE.progressBarContext = { isLive: false, preview: false };
-            applyBarFillColor(el.barFill, STATE.progressBarContext);
-            el.barFill.style.width = pct.toFixed(3) + '%';
-            el.left.textContent = formatTime(cur);
-            el.right.textContent = isFinite(media.duration) ? formatTime(media.duration) : '--:--';
+          const isLive = !isFinite(media.duration);
+          const previewing = !!STATE.seekPreviewActive && !STATE.localSeeking;
+          STATE.progressBarContext = { isLive, preview: previewing && !isLive };
+          applyBarFillColor(el.barFill, STATE.progressBarContext);
+          if (!previewing) {
+            let cur = media.currentTime || 0;
+            let dur = isFinite(media.duration) ? media.duration : cur + 1;
+            let pct = dur ? (cur / dur) * 100 : 0;
+            if (isLive) {
+              el.barFill.style.width = '50%';
+              el.left.textContent = '直播';
+              el.right.textContent = '直播';
+            } else {
+              el.barFill.style.width = pct.toFixed(3) + '%';
+              el.left.textContent = formatTime(cur);
+              el.right.textContent = isFinite(media.duration) ? formatTime(media.duration) : '--:--';
+            }
           }
         }
       }
@@ -1168,25 +1166,22 @@
       } else if (!STATE.fineSeekActive) {
         setProgressHighlight(false);
       }
-      const leftLabel = (p.isLive ? (p.currentTime || '--:--') : (p.preview && typeof p.previewSeconds === 'number' ? formatTime(p.previewSeconds) : (p.currentTime || '--:--')));
-      el.left.textContent = leftLabel;
-      el.right.textContent = (p.isLive ? '直播' : (p.duration || '--:--'));
-  const percent = Math.max(0, Math.min(100, p.percent || 0));
-  el.barFill.style.width = percent.toFixed(3) + '%';
-  STATE.progressBarContext = { isLive: !!p.isLive, preview: !!p.preview && !p.isLive };
-  applyBarFillColor(el.barFill, STATE.progressBarContext);
-      // 预览阶段：在下方左右区显示原位/目标标签
-      if (p.preview && !p.isLive) {
-        if (el.prev) { el.prev.textContent = `原位 ${p.currentTime || '--:--'}`; el.prev.style.display='block'; }
-        if (el.next) {
-          const delta = (typeof p.previewSeconds === 'number' && typeof p.currentTime === 'string') ? '' : '';
-          el.next.textContent = `目标 ${formatTime(p.previewSeconds || 0)}`;
-          el.next.style.display='block';
-        }
+      if (p.isLive) {
+        el.left.textContent = '直播';
+        el.right.textContent = '直播';
+        el.barFill.style.width = '50%';
       } else {
-        if (el.prev) { el.prev.textContent=''; el.prev.style.display='none'; }
-        if (el.next) { el.next.textContent=''; el.next.style.display='none'; }
+        const leftLabel = (p.preview && typeof p.previewSeconds === 'number') ? formatTime(p.previewSeconds) : (p.currentTime || '--:--');
+        el.left.textContent = leftLabel;
+        el.right.textContent = p.duration || '--:--';
+        const percent = Math.max(0, Math.min(100, p.percent || 0));
+        el.barFill.style.width = percent.toFixed(3) + '%';
       }
+      STATE.progressBarContext = { isLive: !!p.isLive, preview: !!p.preview && !p.isLive };
+      applyBarFillColor(el.barFill, STATE.progressBarContext);
+      // 预览阶段：在下方左右区显示原位/目标标签
+      if (el.prev) { el.prev.textContent=''; el.prev.style.display='none'; }
+      if (el.next) { el.next.textContent=''; el.next.style.display='none'; }
       resetOverlayAutoHide();
       ensureProgressTick();
       return true;

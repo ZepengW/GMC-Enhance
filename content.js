@@ -52,7 +52,9 @@
     isRemoteOverlay: false,
     suppressNativeSeekOverlay: true, // 配置：原生拖动不弹 HUD
     extensionSeeking: false, // 扩展内部触发的 seek（允许 HUD）
-    overlayEverShown: false
+    overlayEverShown: false,
+    lastOverlayPayload: null,
+    previewSnapshot: null
   };
 
   function applyKeymap(overrides) {
@@ -587,14 +589,15 @@
   // showHUD removed; use showSelectHUD for brief toasts
   // 统一：本地控制也使用底部 fine overlay，而不再使用顶部 HUD 文本
   function updateLocalOverlay(extra = {}) {
-    if (STATE.isRemoteOverlay && !extra.allowRemoteOverride) return; // Skip if remote HUD owns control
+    if (STATE.isRemoteOverlay && !extra.allowRemoteOverride) return false; // Skip if remote HUD owns control
     const media = getActiveMedia();
-    if (!media) return;
+    if (!media) return false;
     const el = ensureFineOverlay();
     STATE.overlayEverShown = true;
     el.wrap.style.opacity = '1';
     STATE.overlayVisible = true;
     STATE.isRemoteOverlay = false; // 本地触发，标记为非远程
+    STATE.previewSnapshot = null;
     let cur = media.currentTime || 0;
     let durRaw = isFinite(media.duration) ? media.duration : cur + 1;
     let pct = durRaw ? (cur / durRaw) * 100 : 0;
@@ -655,7 +658,18 @@
     resetOverlayAutoHide();
     // 本地触发时不处于预览，开启进度条实时刷新
     STATE.seekPreviewActive = false;
+    STATE.lastOverlayPayload = {
+      isLive,
+      preview: false,
+      percent: isLive ? 50 : Math.max(0, Math.min(100, pct)),
+      leftLabel: el.left.textContent,
+      rightLabel: el.right.textContent,
+      playbackRate: typeof media.playbackRate === 'number' ? media.playbackRate : null,
+      volume: typeof media.volume === 'number' ? media.volume : null,
+      muted: !!media.muted
+    };
     ensureProgressTick();
+    return true;
   }
   function formatTime(t) {
     if (!isFinite(t)) return '--:--';
@@ -858,12 +872,13 @@
     return STATE.fineOverlayEl;
   }
   function updateFineOverlay(media) {
-    if (STATE.isRemoteOverlay) return; // Remote HUD active; avoid flash-back to local status
+    if (STATE.isRemoteOverlay) return false; // Remote HUD active; avoid flash-back to local status
     const el = ensureFineOverlay();
     STATE.overlayEverShown = true;
     el.wrap.style.opacity = '1';
     STATE.overlayVisible = true;
     STATE.isRemoteOverlay = false; // 本地微调，标记为非远程
+    STATE.previewSnapshot = null;
     let cur = media.currentTime || 0;
     let dur = isFinite(media.duration) ? media.duration : cur + 1;
     let pct = dur ? (cur / dur) * 100 : 0;
@@ -919,9 +934,58 @@
     statusLine.appendChild(rateSpan);
     statusLine.appendChild(volSpan);
     el.center.appendChild(statusLine);
+    STATE.lastOverlayPayload = {
+      isLive,
+      preview: false,
+      percent: isLive ? 50 : Math.max(0, Math.min(100, pct)),
+      leftLabel: el.left.textContent,
+      rightLabel: el.right.textContent,
+      playbackRate: typeof media.playbackRate === 'number' ? media.playbackRate : null,
+      volume: typeof media.volume === 'number' ? media.volume : null,
+      muted: !!media.muted
+    };
     resetOverlayAutoHide();
     // 微调不处于预览锁，允许 RAF 正常推进
     ensureProgressTick();
+    return true;
+  }
+
+  function showOverlayPlaceholder(message = '正在获取媒体状态…') {
+    const el = ensureFineOverlay();
+    STATE.overlayEverShown = true;
+    el.wrap.style.opacity = '1';
+    STATE.overlayVisible = true;
+    STATE.isRemoteOverlay = true;
+    STATE.previewSnapshot = null;
+    const cached = STATE.lastOverlayPayload;
+    const percent = cached && typeof cached.percent === 'number' ? cached.percent : null;
+    if (percent !== null) {
+      el.barFill.style.width = percent.toFixed(3) + '%';
+    } else {
+      el.barFill.style.width = '0%';
+    }
+    el.left.textContent = cached && typeof cached.leftLabel === 'string' ? cached.leftLabel : '--:--';
+    el.right.textContent = cached && typeof cached.rightLabel === 'string' ? cached.rightLabel : '--:--';
+    while (el.center.firstChild) el.center.removeChild(el.center.firstChild);
+    el.center.style.display = 'flex';
+    el.center.style.flexDirection = 'column';
+    el.center.style.alignItems = 'center';
+    el.center.style.justifyContent = 'center';
+    el.center.style.width = '100%';
+    const line = document.createElement('div');
+    line.style.cssText = 'display:flex;align-items:center;gap:8px;font-size:12px;opacity:.9;';
+    const spinner = document.createElement('span');
+    spinner.textContent = '⏳';
+    spinner.style.flex = 'none';
+    const text = document.createElement('span');
+    text.textContent = message;
+    text.style.flex = 'none';
+    line.appendChild(spinner);
+    line.appendChild(text);
+    el.center.appendChild(line);
+    if (el.prev) { el.prev.textContent = ''; el.prev.style.display = 'none'; }
+    if (el.next) { el.next.textContent = ''; el.next.style.display = 'none'; }
+    resetOverlayAutoHide();
   }
   function hideFineOverlay() {
     if (!STATE.fineOverlayEl) return;
@@ -930,7 +994,7 @@
     stopProgressTick();
     setProgressHighlight(false);
     STATE.isRemoteOverlay = false;
-    STATE.globalMediaMeta = { index: 0, total: 0 };
+    STATE.previewSnapshot = null;
     // 通知后台覆盖层已隐藏，用于恢复到本页优先控制
     try { chrome.runtime.sendMessage({type:'gmcx-overlay-hidden'}); } catch {}
   }
@@ -1010,7 +1074,18 @@
           const previewing = !!STATE.seekPreviewActive && !STATE.localSeeking;
           STATE.progressBarContext = { isLive, preview: previewing && !isLive };
           applyBarFillColor(el.barFill, STATE.progressBarContext);
-          if (!previewing) {
+          if (previewing && STATE.previewSnapshot && !isLive) {
+            const snap = STATE.previewSnapshot;
+            if (typeof snap.percent === 'number') {
+              el.barFill.style.width = snap.percent.toFixed(3) + '%';
+            }
+            if (typeof snap.leftLabel === 'string' && snap.leftLabel) {
+              el.left.textContent = snap.leftLabel;
+            }
+            if (typeof snap.rightLabel === 'string' && snap.rightLabel) {
+              el.right.textContent = snap.rightLabel;
+            }
+          } else {
             let cur = media.currentTime || 0;
             let dur = isFinite(media.duration) ? media.duration : cur + 1;
             let pct = dur ? (cur / dur) * 100 : 0;
@@ -1023,6 +1098,21 @@
               el.left.textContent = formatTime(cur);
               el.right.textContent = isFinite(media.duration) ? formatTime(media.duration) : '--:--';
             }
+            STATE.previewSnapshot = null;
+          }
+        } else if (STATE.lastOverlayPayload) {
+          const el = ensureFineOverlay();
+          const payload = STATE.lastOverlayPayload;
+          STATE.progressBarContext = { isLive: !!payload.isLive, preview: !!payload.preview && !payload.isLive };
+          applyBarFillColor(el.barFill, STATE.progressBarContext);
+          if (typeof payload.percent === 'number') {
+            el.barFill.style.width = payload.percent.toFixed(3) + '%';
+          }
+          if (typeof payload.leftLabel === 'string') {
+            el.left.textContent = payload.leftLabel;
+          }
+          if (typeof payload.rightLabel === 'string') {
+            el.right.textContent = payload.rightLabel;
           }
         }
       }
@@ -1046,19 +1136,25 @@
       try { chrome.runtime.sendMessage({ type: 'gmcx-command', command: 'cycle-video' }); } catch {}
     },
     seekBack() {
-      updateLocalOverlay();
+      const shown = updateLocalOverlay();
+      if (!shown) showOverlayPlaceholder('正在全局快退…');
       flashProgressHighlight();
       try { chrome.runtime.sendMessage({ type: 'gmcx-command', command: 'seek-back' }); } catch {}
     },
     togglePlayPause() {
       try {
         const media = getActiveMedia();
-        if (media) updateLocalOverlay();
+        if (media) {
+          updateLocalOverlay();
+        } else {
+          showOverlayPlaceholder('正在同步媒体状态…');
+        }
       } catch {}
       try { chrome.runtime.sendMessage({ type: 'gmcx-command', command: 'toggle-play-pause' }); } catch {}
     },
     seekForward() {
-      updateLocalOverlay();
+      const shown = updateLocalOverlay();
+      if (!shown) showOverlayPlaceholder('正在全局快进…');
       flashProgressHighlight();
       try { chrome.runtime.sendMessage({ type: 'gmcx-command', command: 'seek-forward' }); } catch {}
     },
@@ -1242,6 +1338,35 @@
       // 预览阶段：在下方左右区显示原位/目标标签
       if (el.prev) { el.prev.textContent=''; el.prev.style.display='none'; }
       if (el.next) { el.next.textContent=''; el.next.style.display='none'; }
+      const computedPercent = (() => {
+        const base = typeof p.percent === 'number' ? Number(p.percent) : NaN;
+        if (!isFinite(base)) return null;
+        return Math.max(0, Math.min(100, base));
+      })();
+      STATE.lastOverlayPayload = {
+        isLive: !!p.isLive,
+        preview: !!p.preview,
+        percent: computedPercent,
+        leftLabel: el.left.textContent,
+        rightLabel: el.right.textContent,
+        playbackRate: typeof p.playbackRate === 'number' ? p.playbackRate : null,
+        volume: typeof p.volume === 'number' ? p.volume : null,
+        muted: !!p.muted
+      };
+      if (STATE.seekPreviewActive && !p.isLive) {
+        if (typeof p.previewSeconds === 'number' && computedPercent !== null) {
+          STATE.previewSnapshot = {
+            seconds: Math.max(0, Number(p.previewSeconds)),
+            percent: computedPercent,
+            leftLabel: el.left.textContent,
+            rightLabel: el.right.textContent
+          };
+        } else {
+          STATE.previewSnapshot = null;
+        }
+      } else if (!STATE.seekPreviewActive) {
+        STATE.previewSnapshot = null;
+      }
       resetOverlayAutoHide();
       ensureProgressTick();
       return true;

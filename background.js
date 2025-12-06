@@ -33,7 +33,8 @@ const GLOBAL_MEDIA = {
   volumeStep: 0.1,
   overlaySeq: 0,
   seekOpId: 0,
-  currentSeekOpId: 0
+  currentSeekOpId: 0,
+  lastPreviewTime: null
 };
 // 覆盖层可见期间推送同步（跨标签时启用）
 let OVERLAY_WATCH_TIMER = null;
@@ -392,7 +393,10 @@ function scheduleSeekCommit() {
       // 使用绝对目标时间提交，避免在累计期间播放进度造成的偏移
       let targetSec = (GLOBAL_MEDIA.baseTime != null ? GLOBAL_MEDIA.baseTime : (entry.info?.rawCurrentTime || 0)) + GLOBAL_MEDIA.seekAccumDelta;
       targetSec = Math.max(0, Number(targetSec));
-      await sendToTab(entry.tab.id, { type:'gmcx-set-media-currentTime', value: targetSec, silent: true });
+      const alreadyApplied = (GLOBAL_MEDIA.lastPreviewTime != null && Math.abs(GLOBAL_MEDIA.lastPreviewTime - targetSec) < 0.05);
+      if (!alreadyApplied) {
+        await sendToTab(entry.tab.id, { type:'gmcx-set-media-currentTime', value: targetSec, silent: true });
+      }
       const updated = await sendToTab(entry.tab.id, {type:'gmcx-get-media-info'});
       if (updated && updated.ok) {
         GLOBAL_MEDIA.baseTime = updated.rawCurrentTime;
@@ -430,6 +434,7 @@ function scheduleSeekCommit() {
       }
     } finally {
       GLOBAL_MEDIA.seekAccumDelta = 0;
+      GLOBAL_MEDIA.lastPreviewTime = null;
     }
   }, GLOBAL_MEDIA.seekDebounce);
 }
@@ -439,6 +444,7 @@ async function accumulateSeek(delta) {
   // 新的 seek 会话：当累计量为 0 时分配操作 ID
   if (GLOBAL_MEDIA.seekAccumDelta === 0) {
     GLOBAL_MEDIA.currentSeekOpId = ++GLOBAL_MEDIA.seekOpId;
+    GLOBAL_MEDIA.lastPreviewTime = null;
     // 强制刷新基准时间与缓存 info，避免使用过期基准
     const entry0 = GLOBAL_MEDIA.mediaList[GLOBAL_MEDIA.selectedIndex];
     if (entry0) {
@@ -474,7 +480,17 @@ async function accumulateSeek(delta) {
   const list = GLOBAL_MEDIA.mediaList;
   const updatedDurRaw = info.rawDuration; // Might be stale; acceptable for preview
   const base = GLOBAL_MEDIA.baseTime != null ? GLOBAL_MEDIA.baseTime : info.rawCurrentTime;
-  const previewTime = Math.max(0, base + GLOBAL_MEDIA.seekAccumDelta);
+  let previewTime = Math.max(0, base + GLOBAL_MEDIA.seekAccumDelta);
+  if (isFinite(updatedDurRaw)) {
+    previewTime = Math.min(previewTime, updatedDurRaw);
+  }
+  try {
+    await sendToTab(tab.id, { type: 'gmcx-set-media-currentTime', value: previewTime, silent: true, preview: true });
+    GLOBAL_MEDIA.lastPreviewTime = previewTime;
+    if (entry.info) {
+      entry.info.rawCurrentTime = previewTime;
+    }
+  } catch {}
   const percent = updatedDurRaw ? (previewTime / updatedDurRaw) * 100 : 0;
   overlayUpdateOnActive({
     mode:'seek-preview',

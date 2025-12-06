@@ -617,8 +617,26 @@ function renderMediaList(mediaList) {
           return (t * (W-12) + 6);
         };
         const yFromRatio = (r) => plotH - (r * plotH); // r: 0..1 (幅度映射)
+        const bandBounds = eqFreqs.map((f, i) => {
+          const prev = eqFreqs[i - 1] || f / 2;
+          const next = eqFreqs[i + 1] || f * 2;
+          if (i === 0 && eqFreqs.length > 1) {
+            const ratio = next / f || 2;
+            return { left: f / Math.sqrt(ratio), right: Math.sqrt(f * next) };
+          }
+          if (i === eqFreqs.length - 1 && eqFreqs.length > 1) {
+            const ratio = f / (eqFreqs[i - 1] || prev) || 2;
+            return { left: Math.sqrt(f * prev), right: f * Math.sqrt(ratio) };
+          }
+          if (eqFreqs.length === 1) {
+            const r = 2;
+            return { left: f / Math.sqrt(r), right: f * Math.sqrt(r) };
+          }
+          return { left: Math.sqrt(f * prev), right: Math.sqrt(f * next) };
+        });
         let barCentersPre = [];
         let barCentersPost = [];
+        let bandLabelCenters = [];
         const drawGroupedBars = () => {
           const showPre = !!(eqShowPre?.checked && emaPre.length);
           const showPost = !!(eqShowPost?.checked && emaPost.length);
@@ -626,11 +644,13 @@ function renderMediaList(mediaList) {
           const n = eqFreqs.length;
           for (let i=0;i<n;i++) {
             const f = eqFreqs[i];
-            const fn = eqFreqs[Math.min(i+1, n-1)];
-            const x0 = xAtF(f);
-            const x1 = xAtF(fn);
-            const slotW = (x1 - x0)*0.88; // 可利用宽度
-            const cx = x0 + (x1-x0)/2;
+            const bounds = bandBounds[i];
+            const leftBound = Math.max(1, bounds?.left || f / Math.sqrt(2));
+            const rightBound = Math.max(leftBound * 1.01, bounds?.right || f * Math.sqrt(2));
+            const xLeft = xAtF(leftBound);
+            const xRight = xAtF(rightBound);
+            const slotW = Math.max(6, (xRight - xLeft) * 0.96);
+            const cx = xLeft + (xRight - xLeft) / 2;
             let bars = [];
             if (showPre) bars.push({ type:'pre', v: emaPre[i]||0 });
             if (showPost) bars.push({ type:'post', v: emaPost[i]||0 });
@@ -650,6 +670,7 @@ function renderMediaList(mediaList) {
               if (b.type==='pre') barCentersPre[i] = centerX; else barCentersPost[i] = centerX;
               startX += barW + gap;
             });
+            bandLabelCenters[i] = cx;
           }
           // 恢复默认 alpha
           eqGraphCtx.globalAlpha = 1;
@@ -716,8 +737,6 @@ function renderMediaList(mediaList) {
           if (eqShowPre?.checked) items.push({type:'box', color:'#1e6fff', label:'原始'});
           if (eqShowPost?.checked) items.push({type:'box', color:'#ff8a2b', label:'调整后'});
           if (eqShowCurve?.checked) items.push({type:'line', color:'#e24a4a', label:'增益'});
-          // 范围标签
-          items.push({type:'text', color:'#666', label:`${displayMin.toFixed(0)}~${displayMax.toFixed(0)} dB`});
           if (!items.length) return;
           eqGraphCtx.save();
           eqGraphCtx.font = `${10*(window.devicePixelRatio||1)}px sans-serif`;
@@ -763,7 +782,8 @@ function renderMediaList(mediaList) {
         let pick = labelFreqs;
         if (labelFreqs.length > 10) pick = labelFreqs.filter((_,i)=> i%2===0);
         pick.forEach(f => {
-          const x = xAtF(f);
+          const idx = eqFreqs.indexOf(f);
+          const x = bandLabelCenters[idx] ?? xAtF(f);
           const lab = f >= 1000 ? (f/1000).toFixed(f>=10000?0:1)+'k' : String(f);
           eqGraphCtx.fillText(lab, x, H-4);
         });

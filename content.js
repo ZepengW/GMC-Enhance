@@ -54,8 +54,38 @@
     extensionSeeking: false, // 扩展内部触发的 seek（允许 HUD）
     overlayEverShown: false,
     lastOverlayPayload: null,
-    previewSnapshot: null
+    previewSnapshot: null,
+    previewSeekInFlight: 0
   };
+
+  function getFullscreenElement() {
+    return document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement || null;
+  }
+  function getOverlayHost() {
+    const fsEl = getFullscreenElement();
+    if (fsEl && fsEl.nodeType === 1) return fsEl;
+    if (document.body) return document.body;
+    return document.documentElement;
+  }
+  function attachOverlayNode(node) {
+    if (!node) return;
+    const host = getOverlayHost();
+    if (!host) return;
+    if (node.parentNode !== host || !node.isConnected) {
+      try { host.appendChild(node); } catch {}
+    }
+  }
+  function syncOverlayHosts() {
+    if (STATE.fineOverlayEl && STATE.fineOverlayEl.wrap) {
+      attachOverlayNode(STATE.fineOverlayEl.wrap);
+    }
+    if (STATE.selectHudEl) {
+      attachOverlayNode(STATE.selectHudEl);
+    }
+  }
+  ['fullscreenchange','webkitfullscreenchange','mozfullscreenchange','MSFullscreenChange']
+    .forEach(evt => document.addEventListener(evt, () => syncOverlayHosts(), true));
+  syncOverlayHosts();
 
   function applyKeymap(overrides) {
     const merged = { ...DEFAULT_KEYMAP };
@@ -140,23 +170,40 @@
     if (!STATE.mediaListenerMap) STATE.mediaListenerMap = new WeakMap();
     if (STATE.mediaListenerMap.has(media)) return;
     const onSeeking = () => {
+      if ((STATE.previewSeekInFlight || 0) > 0) {
+        ensureProgressTick();
+        return;
+      }
       STATE.localSeeking = true;
-      STATE.seekPreviewActive = true;
+      const allowNativeOverlay = !STATE.suppressNativeSeekOverlay;
+      const shouldShowOverlay = STATE.extensionSeeking || allowNativeOverlay;
+      STATE.seekPreviewActive = shouldShowOverlay;
       STATE.isRemoteOverlay = false;
-      // 仅当不是原生触发或已显示过覆盖层才高亮
-      if (!STATE.suppressNativeSeekOverlay || STATE.extensionSeeking || STATE.overlayEverShown) {
+      if (shouldShowOverlay) {
         setProgressHighlight(true, { persist: true });
+      } else if (!STATE.fineSeekActive) {
+        setProgressHighlight(false);
       }
       ensureProgressTick();
     };
     const onSeeked = () => {
+      if ((STATE.previewSeekInFlight || 0) > 0) {
+        STATE.previewSeekInFlight = Math.max(0, STATE.previewSeekInFlight - 1);
+        STATE.localSeeking = false;
+        ensureProgressTick();
+        return;
+      }
+      const triggeredByExtension = !!STATE.extensionSeeking;
+      const allowNativeOverlay = !STATE.suppressNativeSeekOverlay;
+      const shouldShowOverlay = triggeredByExtension || allowNativeOverlay;
       STATE.localSeeking = false;
       STATE.seekPreviewActive = false;
-      setProgressHighlight(false);
-      // 只有扩展触发或之前已经展示过才刷新 HUD
-      if (STATE.extensionSeeking || STATE.overlayEverShown) {
+      if (shouldShowOverlay) {
+        setProgressHighlight(false);
         try { updateLocalOverlay(); } catch {}
         resetOverlayAutoHide();
+      } else if (!STATE.fineSeekActive) {
+        setProgressHighlight(false);
       }
       STATE.extensionSeeking = false; // 重置标记
       ensureProgressTick();
@@ -469,7 +516,7 @@
 
   function ensureSelectionHud() {
     if (STATE.selectHudEl) {
-      if (!STATE.selectHudEl.isConnected) document.documentElement.appendChild(STATE.selectHudEl);
+      attachOverlayNode(STATE.selectHudEl);
       return STATE.selectHudEl;
     }
     const el = document.createElement('div');
@@ -478,7 +525,7 @@
       background:rgba(20,22,26,.72);color:#fff;padding:10px 16px;border-radius:14px;
       font-size:14px;z-index:2147483647;box-shadow:0 6px 24px rgba(0,0,0,.35);
       pointer-events:none;opacity:0;transition:opacity .15s ease;backdrop-filter:blur(8px) saturate(140%);`;
-    document.documentElement.appendChild(el);
+    attachOverlayNode(el);
     STATE.selectHudEl = el;
     return el;
   }
@@ -802,7 +849,7 @@
     if (STATE.fineSeekActive && STATE.fineSeekDir === dir) return;
     STATE.fineSeekActive = true;
     STATE.fineSeekDir = dir;
-    setProgressHighlight(true, { persist: true });
+    setProgressHighlight(true, { persist: true, lock: true });
     const stepOnce = () => {
       const media = getActiveMedia();
       if (!media) return;
@@ -823,7 +870,7 @@
     STATE.fineSeekActive = false;
     STATE.fineSeekDir = 0;
     // 结束微调：不立即隐藏 HUD，而是恢复为常规（蓝色）并继续实时刷新
-    setProgressHighlight(false);
+    setProgressHighlight(false, { force: true });
     STATE.seekPreviewActive = false;
     STATE.isRemoteOverlay = false;
     // 以常规卡片样式刷新一次，并启动自动隐藏计时
@@ -836,7 +883,7 @@
 
   function ensureFineOverlay() {
     if (STATE.fineOverlayEl) {
-      if (!STATE.fineOverlayEl.wrap.isConnected) document.documentElement.appendChild(STATE.fineOverlayEl.wrap);
+      attachOverlayNode(STATE.fineOverlayEl.wrap);
       return STATE.fineOverlayEl;
     }
     const wrap = document.createElement('div');
@@ -867,7 +914,7 @@
     wrap.appendChild(label);
     wrap.appendChild(barOuter);
     wrap.appendChild(carousel);
-    document.documentElement.appendChild(wrap);
+    attachOverlayNode(wrap);
   STATE.fineOverlayEl = { wrap, barOuter, barFill, left, center, right, prev, next };
     return STATE.fineOverlayEl;
   }
@@ -992,7 +1039,7 @@
     STATE.fineOverlayEl.wrap.style.opacity = '0';
     STATE.overlayVisible = false;
     stopProgressTick();
-    setProgressHighlight(false);
+    setProgressHighlight(false, { force: true });
     STATE.isRemoteOverlay = false;
     STATE.previewSnapshot = null;
     // 通知后台覆盖层已隐藏，用于恢复到本页优先控制
@@ -1011,7 +1058,13 @@
     const el = STATE.fineOverlayEl || ensureFineOverlay();
     if (!el || !el.barOuter || !el.barFill) return;
     const ctx = STATE.progressBarContext || { isLive: false, preview: false };
+    const force = !!options.force;
+    const lockRequested = !!options.lock;
+    if (!active && STATE.progressHighlightLock && !force) {
+      return;
+    }
     if (active) {
+      if (lockRequested) STATE.progressHighlightLock = true;
       STATE.progressHighlightActive = true;
       STATE.progressHighlightPersistent = !!options.persist;
       clearTimeout(STATE.progressHighlightTimer);
@@ -1029,6 +1082,7 @@
         }, duration);
       }
     } else {
+      STATE.progressHighlightLock = false;
       STATE.progressHighlightActive = false;
       STATE.progressHighlightPersistent = false;
       clearTimeout(STATE.progressHighlightTimer);
@@ -1315,12 +1369,12 @@
       STATE.seekPreviewActive = !!p.preview;
       if (!p.isLive) {
         if (STATE.seekPreviewActive) {
-          setProgressHighlight(true, { persist: true });
+          setProgressHighlight(true, { persist: true, lock: true });
         } else if (!STATE.fineSeekActive) {
-          setProgressHighlight(false);
+          setProgressHighlight(false, { force: true });
         }
       } else if (!STATE.fineSeekActive) {
-        setProgressHighlight(false);
+        setProgressHighlight(false, { force: true });
       }
       if (p.isLive) {
         el.left.textContent = '直播';
@@ -1380,7 +1434,25 @@
   if (msg?.type === 'gmcx-seek-media') { const media = getActiveMedia(); if (media && isFinite(media.duration)) { const delta = Number(msg.value) || 0; STATE.extensionSeeking = true; media.currentTime = Math.max(0, Math.min(media.duration, media.currentTime + delta)); if (!msg.silent) { showOverlayForMedia(media, `${delta>=0? '快进':'快退'} ${Math.abs(delta)}s`); flashProgressHighlight(); } } sendResponse({ ok: true }); return; }
     if (msg?.type === 'gmcx-set-media-speed') { const media = getActiveMedia(); if (media) { media.playbackRate = Number(msg.value); if (!msg.silent) showOverlayForMedia(media, `速度 ${media.playbackRate.toFixed(2)}×`);} sendResponse({ ok: true }); return; }
     if (msg?.type === 'gmcx-reset-media') { const media = getActiveMedia(); if (media) { media.currentTime = 0; media.playbackRate = 1.0; if (!msg.silent) showOverlayForMedia(media, '重置'); } sendResponse({ ok: true }); return; }
-  if (msg?.type === 'gmcx-set-media-currentTime') { const media = getActiveMedia(); if (media && isFinite(media.duration)) { const target = Math.max(0, Math.min(media.duration, Number(msg.value))); STATE.extensionSeeking = true; media.currentTime = target; if (!msg.silent) { showOverlayForMedia(media, `跳转 ${formatTime(target)}`); flashProgressHighlight(); } } sendResponse({ ok: true }); return; }
+  if (msg?.type === 'gmcx-set-media-currentTime') {
+    const media = getActiveMedia();
+    if (media && isFinite(media.duration)) {
+      const target = Math.max(0, Math.min(media.duration, Number(msg.value)));
+      const previewMode = !!msg.preview;
+      if (previewMode) {
+        STATE.previewSeekInFlight = Math.max(0, Number(STATE.previewSeekInFlight) || 0) + 1;
+      } else {
+        STATE.extensionSeeking = true;
+      }
+      media.currentTime = target;
+      if (!msg.silent && !previewMode) {
+        showOverlayForMedia(media, `跳转 ${formatTime(target)}`);
+        flashProgressHighlight();
+      }
+    }
+    sendResponse({ ok: true });
+    return;
+  }
     // 4) EQ 消息处理
     if (msg?.type === 'gmcx-eq-init') { loadCustomPresets(() => { loadGlobalQ(()=>{ const media = getActiveMedia(); if (!media) { sendResponse({ok:false}); return; } ensureMediaEQ(media); const gains = (EQ.sourceMap.get(media)?.filters || []).map(f => f.gain.value); sendResponse({ok:true, freqs: EQ.freqs, gains, builtin: EQ.builtinPresets, custom: EQ.customPresets, q: EQ.currentQ}); }); }); return true; }
     if (msg?.type === 'gmcx-eq-get-state') { const media = getActiveMedia(); if (!media) { sendResponse({ok:false}); return; } const entry = ensureMediaEQ(media); const gains = entry ? entry.filters.map(f => f.gain.value) : EQ.freqs.map(()=>0); sendResponse({ok:true, gains}); try { const modified = gains.some(v => Math.abs(Number(v)||0) > 0.0001); chrome.runtime.sendMessage({ type: 'gmcx-eq-modified-state', modified }); } catch {} return; }

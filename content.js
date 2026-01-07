@@ -55,7 +55,8 @@
     overlayEverShown: false,
     lastOverlayPayload: null,
     previewSnapshot: null,
-    previewSeekInFlight: 0
+    previewSeekInFlight: 0,
+    hideOnBlur: false
   };
 
   function getFullscreenElement() {
@@ -200,7 +201,7 @@
       STATE.seekPreviewActive = false;
       if (shouldShowOverlay) {
         setProgressHighlight(false);
-        try { updateLocalOverlay(); } catch {}
+        try { updateLocalOverlay({ allowRemoteOverride: true }); } catch {}
         resetOverlayAutoHide();
       } else if (!STATE.fineSeekActive) {
         setProgressHighlight(false);
@@ -732,7 +733,7 @@
       STATE.extensionSeeking = true;
       const next = media.currentTime + deltaSec;
       media.currentTime = Math.max(0, Math.min(isFinite(media.duration) ? media.duration : next, next));
-      updateLocalOverlay({actionLabel: `${deltaSec>=0? '快进':'快退'} ${Math.abs(deltaSec)}s`});
+      updateLocalOverlay({actionLabel: `${deltaSec>=0? '快进':'快退'} ${Math.abs(deltaSec)}s`, allowRemoteOverride: true});
       flashProgressHighlight();
     } catch { showSelectHUD('无法快进/快退'); }
   }
@@ -741,27 +742,27 @@
   if (!media) { showSelectHUD('未找到媒体'); return; }
     rate = Math.max(0.06, Math.min(16, rate));
     media.playbackRate = rate;
-    updateLocalOverlay({actionLabel: `速度 ${rate.toFixed(2)}×`});
+    updateLocalOverlay({actionLabel: `速度 ${rate.toFixed(2)}×`, allowRemoteOverride: true});
   }
   function adjustRate(delta) {
     const media = getActiveMedia();
   if (!media) { showSelectHUD('未找到媒体'); return; }
     const newRate = Math.max(0.06, Math.min(16, (media.playbackRate || 1) + delta));
     media.playbackRate = newRate;
-    updateLocalOverlay({actionLabel: `速度 ${newRate.toFixed(2)}×`});
+    updateLocalOverlay({actionLabel: `速度 ${newRate.toFixed(2)}×`, allowRemoteOverride: true});
   }
   function togglePlay() {
     const media = getActiveMedia();
   if (!media) { showSelectHUD('未找到媒体'); return; }
     if (media.paused) { media.play?.(); }
     else { media.pause?.(); }
-    updateLocalOverlay({actionLabel: media.paused ? '暂停' : '播放'});
+    updateLocalOverlay({actionLabel: media.paused ? '暂停' : '播放', allowRemoteOverride: true});
   }
   // 统一为后台消息调用封装一个操作后展示覆盖层的辅助
   function showOverlayForMedia(media, label) {
     if (!media) return;
     STATE.overlayEverShown = true;
-    updateLocalOverlay({ actionLabel: label });
+    updateLocalOverlay({ actionLabel: label, allowRemoteOverride: true });
   }
   async function saveBlob(blob, filename) {
     const url = URL.createObjectURL(blob);
@@ -842,7 +843,7 @@
     idx = (idx + 1) % STATE.speedCycleList.length;
     const next = STATE.speedCycleList[idx];
     media.playbackRate = next;
-    updateLocalOverlay({actionLabel: `速度 ${next.toFixed(2)}×`});
+    updateLocalOverlay({actionLabel: `速度 ${next.toFixed(2)}×`, allowRemoteOverride: true});
   }
 
   function startFineSeek(dir) {
@@ -857,7 +858,7 @@
         let target = media.currentTime + dir * STATE.fineSeekStep;
         if (isFinite(media.duration)) target = Math.min(Math.max(0, target), media.duration);
         media.currentTime = target;
-        updateFineOverlay(media);
+        updateFineOverlay(media, { allowRemoteOverride: true });
       } catch {}
     };
     stepOnce();
@@ -875,7 +876,7 @@
     STATE.isRemoteOverlay = false;
     // 以常规卡片样式刷新一次，并启动自动隐藏计时
     try {
-      updateLocalOverlay();
+      updateLocalOverlay({ allowRemoteOverride: true });
     } catch {}
     resetOverlayAutoHide();
     ensureProgressTick();
@@ -918,8 +919,8 @@
   STATE.fineOverlayEl = { wrap, barOuter, barFill, left, center, right, prev, next };
     return STATE.fineOverlayEl;
   }
-  function updateFineOverlay(media) {
-    if (STATE.isRemoteOverlay) return false; // Remote HUD active; avoid flash-back to local status
+  function updateFineOverlay(media, extra = {}) {
+    if (STATE.isRemoteOverlay && !extra.allowRemoteOverride) return false; // Remote HUD active; avoid flash-back to local status
     const el = ensureFineOverlay();
     STATE.overlayEverShown = true;
     el.wrap.style.opacity = '1';
@@ -1034,25 +1035,44 @@
     if (el.next) { el.next.textContent = ''; el.next.style.display = 'none'; }
     resetOverlayAutoHide();
   }
-  function hideFineOverlay() {
+  function hideFineOverlay(options = {}) {
     if (!STATE.fineOverlayEl) return;
+    const silent = !!options.silent;
     STATE.fineOverlayEl.wrap.style.opacity = '0';
     STATE.overlayVisible = false;
     stopProgressTick();
     setProgressHighlight(false, { force: true });
     STATE.isRemoteOverlay = false;
     STATE.previewSnapshot = null;
-    // 通知后台覆盖层已隐藏，用于恢复到本页优先控制
-    try { chrome.runtime.sendMessage({type:'gmcx-overlay-hidden'}); } catch {}
+    STATE.hideOnBlur = false;
+    if (!silent) {
+      // 通知后台覆盖层已隐藏，用于恢复到本页优先控制
+      try { chrome.runtime.sendMessage({type:'gmcx-overlay-hidden'}); } catch {}
+    }
   }
   function resetOverlayAutoHide() {
     clearTimeout(STATE.overlayHideTimer);
     STATE.overlayHideTimer = setTimeout(() => {
       // 若正在微调，不隐藏（可选策略：即使微调也隐藏；当前保留）
-      if (STATE.fineSeekActive) return;
+      if (STATE.fineSeekActive) {
+        resetOverlayAutoHide();
+        return;
+      }
       hideFineOverlay();
     }, STATE.overlayHideDelay);
   }
+
+  function handleVisibilityChange() {
+    if (document.visibilityState === 'hidden' || document.hidden) {
+      if (STATE.overlayVisible) {
+        STATE.hideOnBlur = true;
+        hideFineOverlay({ silent: true });
+      }
+    } else {
+      STATE.hideOnBlur = false;
+    }
+  }
+  document.addEventListener('visibilitychange', handleVisibilityChange, true);
 
   function setProgressHighlight(active, options = {}) {
     const el = STATE.fineOverlayEl || ensureFineOverlay();
@@ -1190,7 +1210,7 @@
       try { chrome.runtime.sendMessage({ type: 'gmcx-command', command: 'cycle-video' }); } catch {}
     },
     seekBack() {
-      const shown = updateLocalOverlay();
+      const shown = updateLocalOverlay({ allowRemoteOverride: true });
       if (!shown) showOverlayPlaceholder('正在全局快退…');
       flashProgressHighlight();
       try { chrome.runtime.sendMessage({ type: 'gmcx-command', command: 'seek-back' }); } catch {}
@@ -1199,7 +1219,7 @@
       try {
         const media = getActiveMedia();
         if (media) {
-          updateLocalOverlay();
+          updateLocalOverlay({ allowRemoteOverride: true });
         } else {
           showOverlayPlaceholder('正在同步媒体状态…');
         }
@@ -1207,7 +1227,7 @@
       try { chrome.runtime.sendMessage({ type: 'gmcx-command', command: 'toggle-play-pause' }); } catch {}
     },
     seekForward() {
-      const shown = updateLocalOverlay();
+      const shown = updateLocalOverlay({ allowRemoteOverride: true });
       if (!shown) showOverlayPlaceholder('正在全局快进…');
       flashProgressHighlight();
       try { chrome.runtime.sendMessage({ type: 'gmcx-command', command: 'seek-forward' }); } catch {}
@@ -1225,7 +1245,7 @@
             const media = getActiveMedia();
             if (media) {
               media.muted = !media.muted;
-              updateLocalOverlay();
+              updateLocalOverlay({ allowRemoteOverride: true });
             }
           }
         });
@@ -1233,7 +1253,7 @@
         const media = getActiveMedia();
         if (media) {
           media.muted = !media.muted;
-          updateLocalOverlay();
+          updateLocalOverlay({ allowRemoteOverride: true });
         }
       }
     },

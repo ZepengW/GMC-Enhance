@@ -478,13 +478,23 @@
       // 小窗 + 静音 + 初始/预览状态 → 视为主页推荐/小窗预览，排除
       return (tiny || smallByClient || smallByVideo) && mutedPreview && coldStart;
     };
+    const isMutedPreviewish = (el) => {
+      if (!(el instanceof HTMLVideoElement)) return false;
+      if (!el.muted && (el.volume || 0) > 0) return false;
+      const rect = el.getBoundingClientRect();
+      const early = (el.currentTime || 0) < 5;
+      const smallish = rect.width < 360 || rect.height < 220 || (el.videoWidth || 0) < 480 || (el.videoHeight || 0) < 270;
+      const shortClip = isFinite(el.duration) && el.duration <= 120;
+      return early && (smallish || shortClip);
+    };
     const isCandidateMedia = (el) => {
       if (!(el instanceof HTMLMediaElement)) return false;
       if (el.ended) return false;
-      // 需要有部分数据（更严格，避免空白/壳元素）
-      if (el.readyState < 2) return false; // HAVE_CURRENT_DATA
+      // 需要有元数据可用，允许 HAVE_METADATA 以兼容 YouTube 初始加载
+      if (el.readyState < 1) return false; // HAVE_METADATA
       if (el instanceof HTMLVideoElement) {
         if (isMiniPreview(el)) return false;
+        if (isMutedPreviewish(el)) return false;
       }
       return true;
     };
@@ -515,6 +525,16 @@
     return medias;
   }
 
+  function refreshVideosCache(force = false) {
+    const now = Date.now();
+    if (!force && STATE.lastMediaScanTs && (now - STATE.lastMediaScanTs) < 600) {
+      return STATE.videosCache;
+    }
+    STATE.videosCache = collectVideos();
+    STATE.lastMediaScanTs = now;
+    return STATE.videosCache;
+  }
+
   function ensureSelectionHud() {
     if (STATE.selectHudEl) {
       attachOverlayNode(STATE.selectHudEl);
@@ -539,24 +559,29 @@
   }
 
   function resolveSelectedMedia() {
-    // 优先使用当前缓存与 selectedIndex
+    // 先刷新缓存（带节流），确保滚动/切页时能看到新媒体
+    refreshVideosCache();
     if (!STATE.videosCache.length) {
-      STATE.videosCache = collectVideos();
       STATE.selectedIndex = 0;
+      return null;
     }
     if (STATE.selectedIndex >= STATE.videosCache.length) STATE.selectedIndex = 0;
-    const el = STATE.videosCache[STATE.selectedIndex];
-    if (el && document.contains(el)) {
-      rememberActiveMedia(el);
-      return el;
+    let el = STATE.videosCache[STATE.selectedIndex];
+    // 若当前选中已不可用，回退到第一项
+    if (!(el && document.contains(el))) {
+      refreshVideosCache(true);
+      if (!STATE.videosCache.length) return null;
+      STATE.selectedIndex = 0;
+      el = STATE.videosCache[0];
     }
-    // 若元素已被移除，清空缓存重建
-    STATE.videosCache = collectVideos();
-    if (!STATE.videosCache.length) return null;
-    STATE.selectedIndex = 0;
-    const next = STATE.videosCache[0] || null;
-    if (next) rememberActiveMedia(next);
-    return next;
+    // 如果当前选中处于暂停而列表中存在正在播放的媒体，自动切换到正在播放的媒体（解决短视频上下滑仍控制旧视频的问题）
+    const playingIdx = STATE.videosCache.findIndex(v => v && !v.paused && !v.ended);
+    if (playingIdx >= 0 && STATE.selectedIndex !== playingIdx && (el?.paused || el?.ended)) {
+      STATE.selectedIndex = playingIdx;
+      el = STATE.videosCache[playingIdx];
+    }
+    if (el) rememberActiveMedia(el);
+    return el || null;
   }
 
   function getMediaName(m) {
@@ -1073,6 +1098,14 @@
     }
   }
   document.addEventListener('visibilitychange', handleVisibilityChange, true);
+
+  function handleDocumentPointerDown() {
+    // 用户点击页面时主动隐藏 HUD，避免遮挡视线（微调过程中不隐藏）
+    if (!STATE.overlayVisible) return;
+    if (STATE.fineSeekActive) return;
+    hideFineOverlay();
+  }
+  document.addEventListener('pointerdown', handleDocumentPointerDown, true);
 
   function setProgressHighlight(active, options = {}) {
     const el = STATE.fineOverlayEl || ensureFineOverlay();

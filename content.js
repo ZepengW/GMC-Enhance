@@ -58,6 +58,7 @@
     previewSeekInFlight: 0,
     hideOnBlur: false
   };
+  STATE.lastOverlayTs = 0; // 最近显示 HUD 的时间戳
 
   function getFullscreenElement() {
     return document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement || null;
@@ -666,10 +667,12 @@
     const media = getActiveMedia();
     if (!media) return false;
     const el = ensureFineOverlay();
+    attachOverlayNode(el.wrap); // 防止宿主被站点移除导致不可见
     STATE.overlayEverShown = true;
     el.wrap.style.opacity = '1';
     STATE.overlayVisible = true;
     STATE.isRemoteOverlay = false; // 本地触发，标记为非远程
+    STATE.lastOverlayTs = Date.now();
     STATE.previewSnapshot = null;
     let cur = media.currentTime || 0;
     let durRaw = isFinite(media.duration) ? media.duration : cur + 1;
@@ -947,10 +950,12 @@
   function updateFineOverlay(media, extra = {}) {
     if (STATE.isRemoteOverlay && !extra.allowRemoteOverride) return false; // Remote HUD active; avoid flash-back to local status
     const el = ensureFineOverlay();
+    attachOverlayNode(el.wrap);
     STATE.overlayEverShown = true;
     el.wrap.style.opacity = '1';
     STATE.overlayVisible = true;
     STATE.isRemoteOverlay = false; // 本地微调，标记为非远程
+    STATE.lastOverlayTs = Date.now();
     STATE.previewSnapshot = null;
     let cur = media.currentTime || 0;
     let dur = isFinite(media.duration) ? media.duration : cur + 1;
@@ -1025,10 +1030,12 @@
 
   function showOverlayPlaceholder(message = '正在获取媒体状态…') {
     const el = ensureFineOverlay();
+    attachOverlayNode(el.wrap);
     STATE.overlayEverShown = true;
     el.wrap.style.opacity = '1';
     STATE.overlayVisible = true;
     STATE.isRemoteOverlay = true;
+    STATE.lastOverlayTs = Date.now();
     STATE.previewSnapshot = null;
     const cached = STATE.lastOverlayPayload;
     const percent = cached && typeof cached.percent === 'number' ? cached.percent : null;
@@ -1102,6 +1109,8 @@
   function handleDocumentPointerDown() {
     // 用户点击页面时主动隐藏 HUD，避免遮挡视线（微调过程中不隐藏）
     if (!STATE.overlayVisible) return;
+    // 若刚刚显示 HUD（如快捷键触发），短时间内不隐藏，避免“刚出就消失”误判
+    if (Date.now() - STATE.lastOverlayTs < 320) return;
     if (STATE.fineSeekActive) return;
     hideFineOverlay();
   }
@@ -1358,9 +1367,11 @@
   // 仅在“预览”阶段阻止本地 RAF，最终/同步状态恢复本地 RAF
   STATE.isRemoteOverlay = !!p.isRemote;
   const el = ensureFineOverlay();
+  attachOverlayNode(el.wrap);
   STATE.overlayEverShown = true;
   el.wrap.style.opacity = '1';
   STATE.overlayVisible = true;
+  STATE.lastOverlayTs = Date.now();
       while (el.center.firstChild) el.center.removeChild(el.center.firstChild);
       el.center.style.display = 'flex';
       el.center.style.flexDirection = 'column';
